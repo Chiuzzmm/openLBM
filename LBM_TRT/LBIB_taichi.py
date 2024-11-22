@@ -102,8 +102,7 @@ class LBIBForm:
         self.omega_sym=omega_sym
         self.omega_antisym=omega_antisym
 
-    def boundaryInfo(self,boundary:int=1,InletMode:int=1,vx:float=0.0,vy:float=0.0,p:float=0.0):
-        self.boundary_condition=boundary
+    def boundaryInfo(self,InletMode:int=1,vx:float=0.0,vy:float=0.0,p:float=0.0):
         self.InletMode=InletMode
         self.vel_wall_Inlet[0]=vx
         self.vel_wall_Inlet[1]=vy
@@ -119,7 +118,6 @@ class LBIBForm:
     def init_hydro(self):
         count_FluidGroup=self.count_FluidGroup[None]
         if self.InletMode==1:
-            #fluild
             for m in range(count_FluidGroup):
                 ix,iy=self.boundaryGroup_Fluid[m]
                 self.vel[ix,iy]=self.vel_wall_Inlet
@@ -240,21 +238,6 @@ class LBIBForm:
             for k in ti.static(range(9)):
                 ti.atomic_add(self.rho[i,j],self.f[i,j][k])
 
-
-    @ti.kernel
-    def computeVelocity(self):
-        count_FluidGroup=self.count_FluidGroup[None]
-        for m in range(count_FluidGroup):
-            i,j=self.boundaryGroup_Fluid[m]
-            self.vel[i,j]=ti.Vector([0.0,0.0])
-            for k in ti.static(range(9)):
-                ti.atomic_add(self.vel[i,j].x,self.f[i,j][k]*self.c[k,0])
-                ti.atomic_add(self.vel[i,j].y,self.f[i,j][k]*self.c[k,1])
-
-                ti.atomic_add(self.vel[i,j].x,0.5*self.bodyForce[i,j].x)
-                ti.atomic_add(self.vel[i,j].y,0.5*self.bodyForce[i,j].y)
-            self.vel[i,j]/=self.rho[i,j]
-
     @ti.kernel
     def computerForceDensity(self):
         #Reset forces
@@ -264,6 +247,31 @@ class LBIBForm:
         for m in range(count_FluidGroup):
             i,j=self.boundaryGroup_Fluid[m]
             ti.atomic_add(self.bodyForce[i,j],self.gravityForce)
+
+    @ti.kernel
+    def computeVelocity(self):
+        count_FluidGroup = self.count_FluidGroup[None]
+        for m in range(count_FluidGroup):
+            i, j = self.boundaryGroup_Fluid[m]
+            self.vel[i, j] = ti.Vector([0.0, 0.0])
+            
+            vel_temp = ti.Vector([0.0, 0.0])
+            for k in ti.static(range(9)):
+                vel_temp.x += self.f[i, j][k] * self.c[k, 0]
+                vel_temp.y += self.f[i, j][k] * self.c[k, 1]
+            
+
+            ti.atomic_add(vel_temp.x, 0.5 * self.bodyForce[i, j].x)
+            ti.atomic_add(vel_temp.y, 0.5 * self.bodyForce[i, j].y)
+            
+            ti.atomic_add(self.vel[i, j].x, vel_temp.x)
+            ti.atomic_add(self.vel[i, j].y, vel_temp.y)
+            
+            self.vel[i, j] /= self.rho[i, j]
+
+
+
+
 
     @ti.func#LBM solve
     def f_eq(self,i,j):
@@ -340,21 +348,15 @@ class LBIBForm:
 
     @ti.kernel#LBM solve
     def stream(self):
-        if self.boundary_condition==1:#inlet mode
-            #stream in InsideGroup
-            count_InsideGroup=self.count_InsideGroup[None]
-            for m in range(count_InsideGroup):
-                i,j =self.boundaryGroup_Inside[m]
-                for k in ti.static(range(9)):
-                    ix2=self.Neighbordata[i,j][k,0]
-                    iy2=self.Neighbordata[i,j][k,1]
-                    self.f[i,j][k]=self.f2[ix2,iy2][k]
-        else:#period mode
-            for i,j in self.f:
-                for k in ti.static(range(9)):
-                    ix2=(i+self.c[k,0]+self.NX)%self.NX
-                    iy2=(j+self.c[k,1]+self.NY)%self.NY
-                    self.f[i,j][k]=self.f2[ix2,iy2][k]
+        #stream in InsideGroup
+        count_InsideGroup=self.count_InsideGroup[None]
+        for m in range(count_InsideGroup):
+            i,j =self.boundaryGroup_Inside[m]
+            for k in ti.static(range(9)):
+                ix2=self.Neighbordata[i,j][k,0]
+                iy2=self.Neighbordata[i,j][k,1]
+                self.f[i,j][k]=self.f2[ix2,iy2][k]
+
 
     @ti.func    
     def NEEM(self,ix,iy,ix2,iy2):
@@ -372,69 +374,65 @@ class LBIBForm:
 
     @ti.kernel
     def update_bounce_back (self):
-        #inlet mode
-        if self.boundary_condition==1:
-            count_WallGroup=self.count_WallGroup[None]
-            for m in range(count_WallGroup):
-                i,j=self.boundaryGroup_Wall[m]
-                for k in ti.static(range(9)):
-                    ix2=self.Neighbordata[i,j][k,0]
-                    iy2=self.Neighbordata[i,j][k,1]
-                    if ix2!=-1:
-                        #stream in boundary
-                        self.f[i,j][k]=self.f2[ix2,iy2][k]
-                    else:
-                        #bounce back on the static wall 
-                        ipop=self.NeighbordataBoundary[i,j][k]
-                        self.f[i,j][k]=self.f2[i,j][ipop]
+        #BB
+        count_WallGroup=self.count_WallGroup[None]
+        for m in range(count_WallGroup):
+            i,j=self.boundaryGroup_Wall[m]
+            for k in ti.static(range(9)):
+                ix2=self.Neighbordata[i,j][k,0]
+                iy2=self.Neighbordata[i,j][k,1]
+                if ix2!=-1:
+                    #stream in boundary
+                    self.f[i,j][k]=self.f2[ix2,iy2][k]
+                else:
+                    #bounce back on the static wall 
+                    ipop=self.NeighbordataBoundary[i,j][k]
+                    self.f[i,j][k]=self.f2[i,j][ipop]
 
-            count_InletGroup=self.count_InletGroup[None]
-            if self.InletMode==1:
-                #Perform velocity bounce back on the inlet
-                for m in range(count_InletGroup):
-                    i,j=self.boundaryGroup_Inlet[m]
+        #inlet
+        count_InletGroup=self.count_InletGroup[None]
+        if self.InletMode==1:
+            #Perform velocity bounce back on the inlet
+            for m in range(count_InletGroup):
+                i,j=self.boundaryGroup_Inlet[m]
 
-                    cv=self.c[1,0]*self.vel_wall_Inlet[0]+self.c[1,1]*self.vel_wall_Inlet[1]
-                    ti.atomic_add(self.f[i,j][1],6*self.weights[1]*self.rho[i,j]*cv)
+                cv=self.c[1,0]*self.vel_wall_Inlet[0]+self.c[1,1]*self.vel_wall_Inlet[1]
+                ti.atomic_add(self.f[i,j][1],6*self.weights[1]*self.rho[i,j]*cv)
 
-                    cv=self.c[5,0]*self.vel_wall_Inlet[0]+self.c[5,1]*self.vel_wall_Inlet[1]
-                    ti.atomic_add(self.f[i,j][5],6*self.weights[5]*self.rho[i,j]*cv)
+                cv=self.c[5,0]*self.vel_wall_Inlet[0]+self.c[5,1]*self.vel_wall_Inlet[1]
+                ti.atomic_add(self.f[i,j][5],6*self.weights[5]*self.rho[i,j]*cv)
 
-                    cv=self.c[8,0]*self.vel_wall_Inlet[0]+self.c[8,1]*self.vel_wall_Inlet[1]
-                    ti.atomic_add(self.f[i,j][8],6*self.weights[8]*self.rho[i,j]*cv)
+                cv=self.c[8,0]*self.vel_wall_Inlet[0]+self.c[8,1]*self.vel_wall_Inlet[1]
+                ti.atomic_add(self.f[i,j][8],6*self.weights[8]*self.rho[i,j]*cv)
 
-            else:
-                for m in range(count_InletGroup):
-                    i,j=self.boundaryGroup_Inlet[m]
-                    ix2=self.Neighbordata[i,j][3,0]
-                    iy2=self.Neighbordata[i,j][3,1]
-                    self.vel[i,j]=self.vel[ix2,iy2]
-                    self.rho[i,j]=self.rho_Inlet
-                    self.f[i,j]=self.NEEM(i,j,ix2,iy2)
+        else:
+            for m in range(count_InletGroup):
+                i,j=self.boundaryGroup_Inlet[m]
+                ix2=self.Neighbordata[i,j][3,0]
+                iy2=self.Neighbordata[i,j][3,1]
+                self.vel[i,j]=self.vel[ix2,iy2]
+                self.rho[i,j]=self.rho_Inlet
+                self.f[i,j]=self.NEEM(i,j,ix2,iy2)
 
-            #Perform Pressure bounce back on the Outlet
-            count_OutletGroup=self.count_OutletGroup[None]
-            for m in range(count_OutletGroup):
-                #NEEM
-                i,j = self.boundaryGroup_Outlet[m]
-                ix2=self.Neighbordata[i,j][1,0]
-                iy2=self.Neighbordata[i,j][1,1]
-                self.rho[i,j]=1.0
-                # self.vel[i,j]=self.vel[ix2,iy2]
-                # self.f[i,j]=self.NEEM(i,j,ix2,iy2)
+        #Perform Pressure bounce back on the Outlet
+        count_OutletGroup=self.count_OutletGroup[None]
+        for m in range(count_OutletGroup):
+            #NEEM
+            i,j = self.boundaryGroup_Outlet[m]
+            ix2=self.Neighbordata[i,j][1,0]
+            iy2=self.Neighbordata[i,j][1,1]
+            self.rho[i,j]=1.0
+            # self.vel[i,j]=self.vel[ix2,iy2]
+            # self.f[i,j]=self.NEEM(i,j,ix2,iy2)
 
-                ftemp=self.ABC(i,j,ix2,iy2)
-                self.f[i,j][3]=ftemp[3]
-                self.f[i,j][6]=ftemp[6]
-                self.f[i,j][7]=ftemp[7]
-
-
-
-                        
-        
-    
+            ftemp=self.ABC(i,j,ix2,iy2)
+            self.f[i,j][3]=ftemp[3]
+            self.f[i,j][6]=ftemp[6]
+            self.f[i,j][7]=ftemp[7]
 
 
+
+                
     @ti.kernel
     def png_cau(self):
         self.img.fill([252/ 255,255/ 255,245/ 255])
@@ -466,9 +464,6 @@ class LBIBForm:
         img_pil.save('boundary.png')
         print("writing_boundary")
 
-
-        
-        
     def LBIB_solve(self):
         self.computeDensity()
 
@@ -496,7 +491,7 @@ class LBIBForm:
 
 
     def writeVTK(self,fname):
-        rho=self.rho.to_numpy().flatten()  
+        rho=self.rho.to_numpy().T.flatten()  
         vel=self.vel.to_numpy()
         velx=vel[:,:,0].T.flatten()  
         vely=vel[:,:,1].T.flatten()  

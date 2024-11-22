@@ -79,9 +79,8 @@ test=LBIB_taichi.LBIBForm(name=name,NX=NX_LB,NY=NY_LB)
 #LBM init
 test.hydroInfo(omega_sym=1.0,omega_antisym=1.0)
 
-boundary_condition=1 #1=inlet,2=period,(note period with no obstacle)
 InletMode=1 #1=vel,2=rho,3=period
-test.boundaryInfo(boundary=boundary_condition,InletMode=InletMode,vx=Ux_LB,vy=Uy_LB)
+test.boundaryInfo(InletMode=InletMode,vx=Ux_LB,vy=Uy_LB)
 test.conversion_coefficient(Cu_py=Cu,C_pressure_py=C_pressure,C_rho_py=C_rho)
 
 
@@ -102,13 +101,13 @@ start_time = time.time()
 gui = ti.GUI(name, (NX_LB,2*NY_LB)) 
 
 index=0
-while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-#for i in range (200):
-    for j in range(200):
+# while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
+for i in range (10):
+    for j in range(50):
 
         # LBM SOLVE
         test.LBIB_solve()
-    index+=200
+    index+=10
     print(index)
 
     pressure = cm.coolwarm(test.post_pressure())
@@ -119,9 +118,9 @@ while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
     gui.show()
 
     
-    # time.sleep(0.2)
-    # filename="test"+'%d' % i
-    # test.writeVTK(filename)
-    # end_time = time.time()
-    # elapsed_time = (end_time - start_time)/60
-    #print({elapsed_time})
+    # # time.sleep(0.2)
+    filename="test"+'%d' % i
+    test.writeVTK(filename)
+    end_time = time.time()
+    elapsed_time = (end_time - start_time)/60
+    print({elapsed_time})
