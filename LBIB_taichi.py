@@ -97,11 +97,7 @@ class LBIBForm:
         #post
         self.img=ti.Vector.field(3,dtype=ti.f32,shape=(self.NX,self.NY))
 
-        
-
-
-
-
+    
     def hydroInfo(self,omega_sym:float,omega_antisym:float):
         self.omega_sym=omega_sym
         self.omega_antisym=omega_antisym
@@ -346,8 +342,6 @@ class LBIBForm:
 
     @ti.kernel#LBM solve
     def stream(self):
-
-        
         if self.boundary_condition==1:#inlet mode
             #stream in InsideGroup
             count_InsideGroup=self.count_InsideGroup[None]
@@ -369,6 +363,14 @@ class LBIBForm:
         feqeq_b=self.f_eq(ix,iy)
         feqeq_f=self.f_eq(ix2,iy2)
         return feqeq_b+self.f[ix2,iy2]-feqeq_f
+
+    @ti.func
+    def ABC(self,ix,iy,ix2,iy2):
+        uw=1.5*self.vel[ix,iy]-0.5*self.vel[ix2,iy2]
+        cu=self.c@uw
+        uw2=tm.dot(uw,uw)
+        return  -self.f[ix,iy]+2*self.weights*(1.0+4.5*cu*cu-1.5*uw2)
+
 
     @ti.kernel
     def update_bounce_back (self):
@@ -415,13 +417,24 @@ class LBIBForm:
             #Perform Pressure bounce back on the Outlet
             count_OutletGroup=self.count_OutletGroup[None]
             for m in range(count_OutletGroup):
+                #NEEM
                 i,j = self.boundaryGroup_Outlet[m]
                 ix2=self.Neighbordata[i,j][1,0]
                 iy2=self.Neighbordata[i,j][1,1]
                 self.rho[i,j]=1.0
-                self.vel[i,j]=self.vel[ix2,iy2]
-                self.f[i,j]=self.NEEM(i,j,ix2,iy2)
+                # self.vel[i,j]=self.vel[ix2,iy2]
+                # self.f[i,j]=self.NEEM(i,j,ix2,iy2)
 
+                ftemp=self.ABC(i,j,ix2,iy2)
+                self.f[i,j][3]=ftemp[3]
+                self.f[i,j][6]=ftemp[6]
+                self.f[i,j][7]=ftemp[7]
+
+
+
+                        
+        
+    
 
 
     @ti.kernel

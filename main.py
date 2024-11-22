@@ -16,7 +16,6 @@ NX_LB =int(40*30)
 NY_LB =int(8*30)
 Cl=domainx/NX_LB
 
-scale=1e-3
 Length_XX1=25*scale
 Length_XX2=35*scale
 Length_XX3=40*scale
@@ -38,7 +37,7 @@ pressure_lnlet=140
 # flow info
 nu=1e-6# Kinematic viscosity
 rho_flow=1000#it.fish.get('rho_ball')#1000 # density of fluid
-rho_gas=800
+
 
 #TRT control pars
 Magic=1/4
@@ -65,8 +64,7 @@ C_torque=C_force*Cl
 C_pressure=C_rho*Cu**2
 
 rho_lnlet=1+pressure_lnlet*3/C_pressure
-rhol_LB=rho_flow/C_rho
-rhog_LB=rho_gas/C_rho
+
 
 
 # DEM boundary condition
@@ -101,14 +99,17 @@ test.init_LBM()
 #==============================================solve & show
 
 start_time = time.time()
-
 gui = ti.GUI(name, (NX_LB,2*NY_LB)) 
+
+index=0
 while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
 #for i in range (200):
-    for j in range(50):
+    for j in range(200):
 
         # LBM SOLVE
         test.LBIB_solve()
+    index+=200
+    print(index)
 
     pressure = cm.coolwarm(test.post_pressure())
     vel_img = cm.plasma(test.post_vel()/0.15)
@@ -117,6 +118,7 @@ while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
     gui.set_image(img)
     gui.show()
 
+    
     # time.sleep(0.2)
     # filename="test"+'%d' % i
     # test.writeVTK(filename)
