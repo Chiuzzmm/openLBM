@@ -42,7 +42,6 @@ class LBIBForm:
 
         self.velcity_conversion=1.0
         self.pressure_conversion=1.0
-        self.denstiy_conversion=1.0
 
         self.f = ti.Vector.field(9, float, shape=(NX, NY)) #populations (old)
         self.f2 = ti.Vector.field(9, float, shape=(NX, NY)) #populations (new)
@@ -109,10 +108,9 @@ class LBIBForm:
         self.rho_Inlet=p
 
 
-    def conversion_coefficient(self,Cu_py:float,C_pressure_py:float,C_rho_py:float):
+    def conversion_coefficient(self,Cu_py:float,C_pressure_py:float):
         self.velcity_conversion=Cu_py
         self.pressure_conversion=C_pressure_py
-        self.denstiy_conversion=C_rho_py
 
     @ti.kernel 
     def init_hydro(self):
@@ -125,7 +123,7 @@ class LBIBForm:
         else:
             for m in range(count_FluidGroup):
                 ix,iy=self.boundaryGroup_Fluid[m]
-                k=(1-self.rho_Inlet)/self.NX
+                k=(1.0-self.rho_Inlet)/self.NX
                 self.vel[ix,iy]=self.vel_wall_Inlet
                 self.rho[ix,iy]=k*ix+self.rho_Inlet
         print("init hydyo")
@@ -365,11 +363,10 @@ class LBIBForm:
         return feqeq_b+self.f[ix2,iy2]-feqeq_f
 
     @ti.func
-    def ABC(self,ix,iy,ix2,iy2):
-        uw=1.5*self.vel[ix,iy]-0.5*self.vel[ix2,iy2]
+    def ABC(self,ix,iy,rho_w,uw):
         cu=self.c@uw
         uw2=tm.dot(uw,uw)
-        return  -self.f[ix,iy]+2*self.weights*(1.0+4.5*cu*cu-1.5*uw2)
+        return  -self.f[ix,iy]+2*self.weights*rho_w*(1.0+4.5*cu*cu-1.5*uw2)
 
 
     @ti.kernel
@@ -404,28 +401,43 @@ class LBIBForm:
 
                 cv=self.c[8,0]*self.vel_wall_Inlet[0]+self.c[8,1]*self.vel_wall_Inlet[1]
                 ti.atomic_add(self.f[i,j][8],6*self.weights[8]*self.rho[i,j]*cv)
-
         else:
             for m in range(count_InletGroup):
                 i,j=self.boundaryGroup_Inlet[m]
                 ix2=self.Neighbordata[i,j][3,0]
                 iy2=self.Neighbordata[i,j][3,1]
-                self.vel[i,j]=self.vel[ix2,iy2]
+                # self.vel[i,j]=self.vel[ix2,iy2]
+                # self.rho[i,j]=self.rho_Inlet
+                # self.f[i,j]=self.NEEM(i,j,ix2,iy2)
+
+                #ABC
+                uw=1.5*self.vel[i,j]-0.5*self.vel[ix2,iy2]
+                self.vel[i,j]=uw
                 self.rho[i,j]=self.rho_Inlet
-                self.f[i,j]=self.NEEM(i,j,ix2,iy2)
+                ftemp=self.ABC(i,j,rho_w=self.rho_Inlet,uw=uw)
+                self.f[i,j][1]=ftemp[1]
+                self.f[i,j][5]=ftemp[5]
+                self.f[i,j][8]=ftemp[8]
 
         #Perform Pressure bounce back on the Outlet
         count_OutletGroup=self.count_OutletGroup[None]
         for m in range(count_OutletGroup):
-            #NEEM
+
             i,j = self.boundaryGroup_Outlet[m]
             ix2=self.Neighbordata[i,j][1,0]
             iy2=self.Neighbordata[i,j][1,1]
-            self.rho[i,j]=1.0
+
+            #NEEM
+            # self.rho[i,j]=1.0
             # self.vel[i,j]=self.vel[ix2,iy2]
             # self.f[i,j]=self.NEEM(i,j,ix2,iy2)
 
-            ftemp=self.ABC(i,j,ix2,iy2)
+
+            #ABC
+            uw=1.5*self.vel[i,j]-0.5*self.vel[ix2,iy2]
+            self.vel[i,j]=uw
+            self.rho[i,j]=1.0
+            ftemp=self.ABC(i,j,rho_w=1.0,uw=uw)
             self.f[i,j][3]=ftemp[3]
             self.f[i,j][6]=ftemp[6]
             self.f[i,j][7]=ftemp[7]
@@ -480,7 +492,7 @@ class LBIBForm:
 
     def post_vel(self):
         vel = self.vel.to_numpy()
-        vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5 
+        vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
         return vel_mag
 
 
@@ -525,7 +537,7 @@ class LBIBForm:
             fout.write("SCALARS Pressure double\n")  
             fout.write("LOOKUP_TABLE Pressure_table\n")  
 
-            np.savetxt(fout, (rho - 1) * self.pressure_conversion, fmt='%.8f') 
+            np.savetxt(fout, (rho - 1) * self.pressure_conversion/3.0, fmt='%.8f') 
 
 
             fout.write("VECTORS velocity double\n")  

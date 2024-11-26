@@ -32,7 +32,7 @@ p8=[Length_XX2,Length_YY2]
 
 # flow boundary condition
 Umax=1e-3
-pressure_lnlet=140
+pressure_lnlet=10
 
 # flow info
 nu=1e-6# Kinematic viscosity
@@ -41,8 +41,10 @@ rho_flow=1000#it.fish.get('rho_ball')#1000 # density of fluid
 
 #TRT control pars
 Magic=1/4
-Ma=0.05 #The larger the Ma, the larger the time step
+
 cs=0.578 # sound speed 
+Ma=Umax/cs*1.5 #The larger the Ma, the larger the time step
+
 
 #conversion coefficient
 Ux_LB=Ma*cs# vel of LB
@@ -65,23 +67,17 @@ C_pressure=C_rho*Cu**2
 
 rho_lnlet=1+pressure_lnlet*3/C_pressure
 
-
-
-# DEM boundary condition
-boundary_condition=1 #1 destroy , 0 periodic
-
-
 #==============================================
 name="test"
 test=LBIB_taichi.LBIBForm(name=name,NX=NX_LB,NY=NY_LB)
 
 
 #LBM init
-test.hydroInfo(omega_sym=1.0,omega_antisym=1.0)
+test.hydroInfo(omega_sym=omega_sym_LB,omega_antisym=omega_antisym_LB)
 
-InletMode=1 #1=vel,2=rho,3=period
-test.boundaryInfo(InletMode=InletMode,vx=Ux_LB,vy=Uy_LB)
-test.conversion_coefficient(Cu_py=Cu,C_pressure_py=C_pressure,C_rho_py=C_rho)
+InletMode=2 #1=vel,2=rho,3=period
+test.boundaryInfo(InletMode=InletMode,vx=Ux_LB,vy=Uy_LB,p=rho_lnlet)
+test.conversion_coefficient(Cu_py=Cu,C_pressure_py=C_pressure)
 
 
 #==============================================LBM boundary
@@ -103,12 +99,10 @@ gui = ti.GUI(name, (NX_LB,2*NY_LB))
 index=0
 # while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
 for i in range (10):
-    for j in range(50):
+    for j in range(2000):
 
         # LBM SOLVE
         test.LBIB_solve()
-    index+=10
-    print(index)
 
     pressure = cm.coolwarm(test.post_pressure())
     vel_img = cm.plasma(test.post_vel()/0.15)
@@ -122,5 +116,5 @@ for i in range (10):
     filename="test"+'%d' % i
     test.writeVTK(filename)
     end_time = time.time()
-    elapsed_time = (end_time - start_time)/60
+    elapsed_time = (end_time - start_time)
     print({elapsed_time})
