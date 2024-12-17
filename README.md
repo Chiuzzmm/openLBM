@@ -1,4 +1,5 @@
-# LBM-in-taichi
+# LBM练习
+示例全部使用taichi编写，LBM计算结构基本相同。部分小功能使用matlab计算。
 
 1. BGK, MRT, TRT 展示了三种不同的碰撞模型以及相应的单位转换过程。
 2. Maxwell 使用python和matlab计算了两种不同的状态方程。
