@@ -8,3 +8,4 @@
 5. contact angle test  使用原始shanchen模型模拟了管道中的液滴。
 6. contact angle test (曲面边界) 使用原始shanchen模型模拟了液滴撞击曲面固体的过程。
 7. MRT-huang 使用Rongzong Huang 提出的模型模拟了无限域中的稳态液滴。
+8. IBM使用了浸没边界法模拟了静止颗粒在管道中的流场。
