@@ -10,3 +10,4 @@
 7. MRT-huang 使用Rongzong Huang 提出的模型模拟了无限域中的稳态液滴。
 8. contact line on stationary circular cylinders 使用Rongzong Huang模型和BC边界模拟了上下半平面为两相的固体接触角。
 9. IBM使用了浸没边界法模拟了静止颗粒在管道中的流场, IBM使用MDF格式。
+10. IBM-SC使用浸没边界法代替固体边界，结合Rongzong Huang模型模拟两相流体。注意在该模拟中，IB节点设置在气体区域中需要适当的初始条件，否则容易崩溃。
