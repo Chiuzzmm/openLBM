@@ -38,7 +38,7 @@ pressure_lnlet=10
 
 # flow info
 shear_viscosity=1e-6
-bulk_viscosity=1.28e-6
+bulk_viscosity=1.e-4
 rho_flow=1000#it.fish.get('rho_ball')#1000 # density of fluid
 
 cs=0.578 # sound speed 
@@ -96,17 +96,24 @@ boundary_engine.Mask_rectangle_identify(lb_field,p4[0]/Cl-0.5,p8[0]/Cl-0.5,p4[1]
 boundary_engine.Boundary_identify(lb_field)
 boundary_engine.writing_boundary(lb_field)
 
-#==============================================
-global_engine=openLBM.GlobalEngine()
-global_engine.init_hydro(lb_field)
-global_engine.init_LBM(lb_field)
+
 #==============================================
 macroscopic_engine=openLBM.MacroscopicEngine()
 #==============================================
-collision_engine=openLBM.CollisionEngine()
+# collision_engine=openLBM.BGKCollision()
 # collision_engine.Relaxation_pars(omega=omega)#BGK
+
+# collision_engine=openLBM.TRTCollision()
 # collision_engine.Relaxation_pars(omega_sym=omega_sym_LB,omega_antisym=omega_antisym_LB)#TRT
-collision_engine.Relaxation_pars(omega_e=omega_e,omega_v=omega_v)
+
+collision_engine=openLBM.MRTCollision()
+collision_engine.Relaxation_pars(omega_v=omega_v,omega_e=omega_e,omega_q=omega_q,omega_epsilon=omega_epsilon)#MRT
+
+#==============================================
+global_engine=openLBM.GlobalEngine()
+global_engine.init_hydro(lb_field)
+global_engine.init_LBM(lb_field,collision_engine)
+
 
 #==============================================
 stream_engine=openLBM.StreamEngine()
@@ -125,9 +132,7 @@ while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
         macroscopic_engine.computerForceDensity(lb_field)
         macroscopic_engine.computeVelocity(lb_field)
         
-        # collision_engine.BGKCollide(lb_field)
-        # collision_engine.TRTCollide(lb_field)
-        collision_engine.MRTCollide(lb_field)
+        collision_engine.Collision(lb_field)
 
         stream_engine.StreamInside(lb_field)
         

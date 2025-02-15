@@ -64,15 +64,6 @@ class LBField:
         self.velcity_conversion=1.0
         self.pressure_conversion=1.0
 
-
-        #sc 
-        self.rho_cr=tm.log(2.0)
-        self.rho_liq=1.95
-        self.rho_gas=0.15
-        self.rho0=1.0
-        self.rho_solid=self.rho_gas+0.5*(self.rho_liq-self.rho_gas)
-
-        self.gA=-5.0
         self.SCforce=ti.Vector.field(2, float, shape=(NX, NY))
         
 
@@ -84,12 +75,6 @@ class LBField:
         self.mask_InletGroup.fill(0)
         self.mask_OutletGroup.fill(0)
         self.SCforce.fill([0.0,0.0])
-
-    def ShanChenSetting(self,rho_liq=1.95,rho_gas=0.15,rho_solid_cof=0.9,gA=-5.0):
-        self.rho_liq=rho_liq
-        self.rho_gas=rho_gas
-        self.rho_solid=self.rho_gas+rho_solid_cof*(self.rho_liq-self.rho_gas)
-        self.gA=gA
 
 
 
@@ -111,144 +96,13 @@ class LBField:
         vel = self.vel.to_numpy()
         vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
         return vel_mag
-    
-    # funcs 
-    @ti.func
-    def f_eq(self,i,j):
-        eu=self.c @ self.vel[i,j]
-        uv=tm.dot(self.vel[i,j],self.vel[i,j])
-        return self.weights*self.rho[i,j]*(1+3*eu+4.5*eu*eu-1.5*uv)
 
-    @ti.func
-    def f_force(self,i,j):
-        F=self.bodyForce[i,j]
-        cF=self.c @ F
-        cu=self.c @self.vel[i,j]
-        uF=tm.dot(self.vel[i,j],F)
-        return self.weights*(3*cF+9*cF*cu-3*uF)
-    
-    @ti.func
-    def f_force(self,i,j):
-        F=self.bodyForce[i,j]
-        cF=self.c @ F
-        cu=self.c @self.vel[i,j]
-        uF=tm.dot(self.vel[i,j],F)
-        return self.weights*(3*cF+9*cF*cu-3*uF)
 
-    @ti.func    
-    def NEEM(self,ix,iy,ix2,iy2):
-        feqeq_b=self.f_eq(ix,iy)
-        feqeq_f=self.f_eq(ix2,iy2)
-        return feqeq_b+self.f[ix2,iy2]-feqeq_f
 
-    @ti.func
-    def ABC(self,ix,iy,rho_w,uw):
-        cu=self.c@uw
-        uw2=tm.dot(uw,uw)
-        return  -self.f[ix,iy]+2*self.weights*rho_w*(1.0+4.5*cu*cu-1.5*uw2)
-    
-    @ti.func
-    def f_sym(self,i,j):
-        f_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-        f_sym[0]=self.f[i,j][0]
-        f_sym[1]=(self.f[i,j][1]+self.f[i,j][3])/2
-        f_sym[2]=(self.f[i,j][2]+self.f[i,j][4])/2
-        f_sym[3]=f_sym[1]
-        f_sym[4]=f_sym[2]
-        f_sym[5]=(self.f[i,j][5]+self.f[i,j][7])/2
-        f_sym[6]=(self.f[i,j][6]+self.f[i,j][8])/2
-        f_sym[7]=f_sym[5]
-        f_sym[8]=f_sym[6]
-        return f_sym
-    
-    @ti.func
-    def feq_sym(self,feqeq):
-        feq_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-        feq_sym[0]=feqeq[0]
-        feq_sym[1]=(feqeq[1]+feqeq[3])/2
-        feq_sym[2]=(feqeq[2]+feqeq[4])/2
-        feq_sym[3]=feq_sym[1]
-        feq_sym[4]=feq_sym[2]
-        feq_sym[5]=(feqeq[5]+feqeq[7])/2
-        feq_sym[6]=(feqeq[6]+feqeq[8])/2
-        feq_sym[7]=feq_sym[5]
-        feq_sym[8]=feq_sym[6]
-        return feq_sym
-    
-    @ti.func
-    def force_sym(self,force):
-        force_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-        force_sym[0]=force[0]
-        force_sym[1]=(force[1]+force[3])/2
-        force_sym[2]=(force[2]+force[4])/2
-        force_sym[3]=force_sym[1]
-        force_sym[4]=force_sym[2]
-        force_sym[5]=(force[5]+force[7])/2
-        force_sym[6]=(force[6]+force[8])/2
-        force_sym[7]=force_sym[5]
-        force_sym[8]=force_sym[6]
-        return force_sym
-    
-    @ti.func
-    def m_force(self,i,j):
-        mforce=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-        F=self.bodyForce[i,j]
-        Fu=tm.dot(F,self.vel[i,j])
 
-        mforce[1]=6*Fu
-        mforce[2]=-6*Fu
-        mforce[3]=F[0]
-        mforce[4]=-F[0]
-        mforce[5]=F[1]
-        mforce[6]=-F[1]
-        mforce[7]=2*(F[0]*self.vel[i,j].x-F[1]*self.vel[i,j].y)
-        mforce[8]=F[1]*self.vel[i,j].x+F[0]*self.vel[i,j].y
-
-        return mforce
-    
-    @ti.func
-    def m_Q(self,i,j):
-        Qm=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-
-        F=self.bodyForce[i,j]
-        F2=tm.dot(F,F)
-        a=3*(self.k1+2*self.k2)*F2
-        b=self.gA*self.psi(self.rho[i,j])**2
-        
-        Qm[1]=a/b
-        Qm[2]=-Qm[1]
-        Qm[7]=self.k1*(F[0]**2-F[1]**2)/b
-        Qm[8]=self.k1*F[0]*F[1]/b
-
-        return Qm
-    
-    @ti.func
-    def m_eq(self,i,j):
-        jx=self.vel[i,j].x
-        jy=self.vel[i,j].y
-        meq=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-
-        meq[0]=1.0
-        meq[1]=-2.0+3.0*(jx**2+jy**2)
-        meq[2]=1.0-3.0*(jx**2+jy**2)
-        meq[3]=jx
-        meq[4]=-jx
-        meq[5]=jy
-        meq[6]=-jy
-        meq[7]=(jx**2-jy**2)
-        meq[8]=jx*jy
-
-        meq*=self.rho[i,j]
-        return meq
-    
-    @ti.func
-    def psi(self,dens):
-        return self.rho0*(1.0-tm.exp(-dens/self.rho0))
-    
 
 @ti.data_oriented
 class BoundaryEngine:
-
     @ti.kernel
     def Boundary_identify(self,lb_filed:ti.template()):
         #Group identify
@@ -377,6 +231,24 @@ class BoundaryEngine:
             if (ix-x)**2+(iy-y)**2<r**2:
                 lb_filed.mask[ix,iy]=-1
 
+    @ti.func
+    def f_eq(self,c,w,vel,rho):
+        eu=c @ vel
+        uv=tm.dot(vel,vel)
+        return w*rho*(1+3*eu+4.5*eu*eu-1.5*uv)
+    
+    @ti.func    
+    def NEEM(self,c,w,vel1,rho1,vel2,rho2,f2):
+        feqeq_b=self.f_eq(c,w,vel1,rho1)
+        feqeq_f=self.f_eq(c,w,vel2,rho2)
+        return feqeq_b+f2-feqeq_f
+
+    @ti.func
+    def ABC(self,c,w,f,rho_w,uw):
+        cu=c@uw
+        uw2=tm.dot(uw,uw)
+        return  -f+2*w*rho_w*(1.0+4.5*cu*cu-1.5*uw2)
+    
     @ti.kernel
     def BounceBackInside (self,lb_filed:ti.template()):
         #BB
@@ -416,18 +288,19 @@ class BoundaryEngine:
                 i,j=lb_filed.boundaryGroup_Inlet[m]
                 ix2=lb_filed.Neighbordata[i,j][3,0]
                 iy2=lb_filed.Neighbordata[i,j][3,1]
-                # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-                # lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                # lb_filed.f[i,j]=lb_filed.NEEM(i,j,ix2,iy2)
+                lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
+                lb_filed.rho[i,j]=lb_filed.rho_Inlet
+                lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
 
                 #ABC
-                uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-                lb_filed.vel[i,j]=uw
-                lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                ftemp=lb_filed.ABC(i,j,rho_w=lb_filed.rho_Inlet,uw=uw)
-                lb_filed.f[i,j][1]=ftemp[1]
-                lb_filed.f[i,j][5]=ftemp[5]
-                lb_filed.f[i,j][8]=ftemp[8]
+                # uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
+                # lb_filed.vel[i,j]=uw
+                # lb_filed.rho[i,j]=lb_filed.rho_Inlet
+                # ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],lb_filed.rho_Inlet,uw)
+                # lb_filed.f[i,j][1]=ftemp[1]
+                # lb_filed.f[i,j][5]=ftemp[5]
+                # lb_filed.f[i,j][8]=ftemp[8]
+
     @ti.kernel
     def BounceBackOutlet(self,lb_filed:ti.template()):
         #Perform Pressure bounce back on the Outlet
@@ -439,18 +312,18 @@ class BoundaryEngine:
             iy2=lb_filed.Neighbordata[i,j][1,1]
 
             #NEEM
-            # lb_filed.rho[i,j]=1.0
-            # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-            # lb_filed.f[i,j]=lb_filed.NEEM(i,j,ix2,iy2)
+            lb_filed.rho[i,j]=1.0
+            lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
+            lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
 
             #ABC
-            uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-            lb_filed.vel[i,j]=uw
-            lb_filed.rho[i,j]=1.0
-            ftemp=lb_filed.ABC(i,j,rho_w=1.0,uw=uw)
-            lb_filed.f[i,j][3]=ftemp[3]
-            lb_filed.f[i,j][6]=ftemp[6]
-            lb_filed.f[i,j][7]=ftemp[7]
+            # uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
+            # lb_filed.vel[i,j]=uw
+            # lb_filed.rho[i,j]=1.0
+            # ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],1.0,uw)
+            # lb_filed.f[i,j][3]=ftemp[3]
+            # lb_filed.f[i,j][6]=ftemp[6]
+            # lb_filed.f[i,j][7]=ftemp[7]
 
 @ti.data_oriented
 class GlobalEngine:
@@ -472,10 +345,11 @@ class GlobalEngine:
 
 
     @ti.kernel
-    def init_LBM(self,lb_filed:ti.template()):
+    def init_LBM(self,lb_filed:ti.template(),collsion:ti.template()):
         for i,j in ti.ndrange(lb_filed.NX, lb_filed.NY):
-            lb_filed.f[i,j]=lb_filed.f2[i,j]=lb_filed.f_eq(i,j)
+            lb_filed.f[i,j]=lb_filed.f2[i,j]=collsion.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
         print("init LBM")
+
 
     def writeVTK(self,fname,lb_filed:ti.template()):
         rho=lb_filed.rho.to_numpy().T.flatten()  
@@ -540,12 +414,12 @@ class MacroscopicEngine:
                 lb_filed.rho[i,j]+=lb_filed.f[i,j][k]
             
     @ti.kernel
-    def computePressure(self,lb_filed:ti.template()):
+    def computePressure(self,lb_filed:ti.template(),sc_filed:ti.template()):
         lb_filed.pressure.fill(0.0)
         count_FluidGroup = lb_filed.count_FluidGroup[None]
         for m in range(count_FluidGroup):
             i, j = lb_filed.boundaryGroup_Fluid[m]
-            lb_filed.pressure[i,j]=lb_filed.rho[i,j]/3.0+lb_filed.gA/6.0*lb_filed.psi(lb_filed.rho[i,j])**2
+            lb_filed.pressure[i,j]=lb_filed.rho[i,j]/3.0+sc_filed.gA/6.0*lb_filed.psi(lb_filed.rho[i,j])**2
 
     @ti.kernel
     def computerForceDensity(self,lb_filed:ti.template()):
@@ -575,15 +449,123 @@ class MacroscopicEngine:
 
 @ti.data_oriented
 class CollisionEngine:
+    @ti.func
+    def f_eq(self,c,w,vel,rho):
+        eu=c @ vel
+        uv=tm.dot(vel,vel)
+        return w*rho*(1+3*eu+4.5*eu*eu-1.5*uv)
+
+    @ti.func
+    def f_force(self,c,w,F,vel):
+        cF=c @ F
+        cu=c @vel
+        uF=tm.dot(vel,F)
+        return w*(3*cF+9*cF*cu-3*uF)
+    
+
+@ti.data_oriented
+class BGKCollision(CollisionEngine):
     def __init__(self):
-        #BGK
+        super().__init__()
         self.omega = 1.0 
 
-        #TRT
+    def Relaxation_pars(self,omega):
+        self.omega=omega
+
+    @ti.kernel#LBM solve
+    def Collision(self,lb_filed:ti.template()):
+        count_FluidGroup=lb_filed.count_FluidGroup[None]
+
+        for m in range(count_FluidGroup):
+            i,j = lb_filed.boundaryGroup_Fluid[m]
+
+            feqeq=self.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
+            force_ij=self.f_force(lb_filed.c,lb_filed.weights,lb_filed.bodyForce[i,j],lb_filed.vel[i,j])
+
+            CollisionOperator =-self.omega*(lb_filed.f[i,j]-feqeq)
+            ForceTerm=(1.0-0.5*self.omega)*force_ij
+
+            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
+
+@ti.data_oriented
+class TRTCollision(CollisionEngine):
+    def __init__(self):
+        super().__init__()
         self.omega_sym=2.0
         self.omega_antisym=1.0
+    
+    def Relaxation_pars(self,omega_sym,omega_antisym):
+        self.omega_sym=omega_sym
+        self.omega_antisym=omega_antisym
 
-        #MRT
+    @ti.func
+    def f_sym(self,f):
+        f_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        f_sym[0]=f[0]
+        f_sym[1]=(f[1]+f[3])/2
+        f_sym[2]=(f[2]+f[4])/2
+        f_sym[3]=f_sym[1]
+        f_sym[4]=f_sym[2]
+        f_sym[5]=(f[5]+f[7])/2
+        f_sym[6]=(f[6]+f[8])/2
+        f_sym[7]=f_sym[5]
+        f_sym[8]=f_sym[6]
+        return f_sym
+    
+    @ti.func
+    def feq_sym(self,feqeq):
+        feq_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        feq_sym[0]=feqeq[0]
+        feq_sym[1]=(feqeq[1]+feqeq[3])/2
+        feq_sym[2]=(feqeq[2]+feqeq[4])/2
+        feq_sym[3]=feq_sym[1]
+        feq_sym[4]=feq_sym[2]
+        feq_sym[5]=(feqeq[5]+feqeq[7])/2
+        feq_sym[6]=(feqeq[6]+feqeq[8])/2
+        feq_sym[7]=feq_sym[5]
+        feq_sym[8]=feq_sym[6]
+        return feq_sym
+    
+    @ti.func
+    def force_sym(self,force):
+        force_sym=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        force_sym[0]=force[0]
+        force_sym[1]=(force[1]+force[3])/2
+        force_sym[2]=(force[2]+force[4])/2
+        force_sym[3]=force_sym[1]
+        force_sym[4]=force_sym[2]
+        force_sym[5]=(force[5]+force[7])/2
+        force_sym[6]=(force[6]+force[8])/2
+        force_sym[7]=force_sym[5]
+        force_sym[8]=force_sym[6]
+        return force_sym
+    
+    @ti.kernel#LBM solve
+    def Collision(self,lb_filed:ti.template()):
+        count_FluidGroup=lb_filed.count_FluidGroup[None]
+        for m in range(count_FluidGroup):
+            i,j = lb_filed.boundaryGroup_Fluid[m]
+
+            feqeq=self.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
+            force_ij=self.f_force(lb_filed.c,lb_filed.weights,lb_filed.bodyForce[i,j],lb_filed.vel[i,j])
+
+            #symmetrical and antisymmetrical particle distribution functions
+            f_sym=self.f_sym(lb_filed.f[i,j])
+            feq_sym=self.feq_sym(feqeq)
+            force_sym=self.force_sym(force_ij)
+
+            f_antisym=lb_filed.f[i,j]-f_sym
+            feq_antisym=feqeq-feq_sym
+            force_antisym=force_ij-force_sym
+
+            CollisionOperator =-self.omega_sym * (f_sym-feq_sym)-self.omega_antisym*(f_antisym-feq_antisym)
+            ForceTerm=(1.0-0.5*self.omega_sym)*force_sym+(1.0-0.5*self.omega_antisym)*force_antisym
+            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
+
+@ti.data_oriented
+class MRTCollision(CollisionEngine):
+    def __init__(self):
+        super().__init__()
         self.M=ti.field(float,shape=(9,9))
         self.M_inverse=ti.field(float,shape=(9,9))
         M_np =np.array([
@@ -603,15 +585,15 @@ class CollisionEngine:
                 self.M_inverse[i,j]=M_inv_np[i,j]
         self.diag=ti.field(float,shape=(9,))
 
-    def Relaxation_pars(self,omega=1.0,omega_sym=2.0,omega_antisym=1.0,omega_e=1.0,omega_v=1.0,omega_q=1.0,omega_epsilon=1.0):
-        #BGK
-        self.omega=omega
+    def Relaxation_pars(self,omega_e,omega_v,omega_q=1,omega_epsilon=1):
+        # self.diag.fill(1.0)
+        # self.diag[1]=omega_e
+        # self.diag[7]=omega_v
+        # self.diag[8]=omega_v
+        # self.diag[4]=omega_q
+        # self.diag[6]=omega_q
+        # self.diag[2]=omega_epsilon
 
-        #TRT
-        self.omega_sym=omega_sym
-        self.omega_antisym=omega_antisym
-
-        #MRT
             # book
         # self.diag.fill(0.0)
         # self.diag[1]=omega_e
@@ -633,46 +615,45 @@ class CollisionEngine:
         self.diag[7]=omega_v
         self.diag[8]=omega_v
 
+    @ti.func
+    def m_eq(self,vel,rho):
+        jx=vel.x
+        jy=vel.y
 
+        meq=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+
+        meq[0]=1.0
+        meq[1]=-2.0+3.0*(jx**2+jy**2)
+        meq[2]=1.0-3.0*(jx**2+jy**2)
+        meq[3]=jx
+        meq[4]=-jx
+        meq[5]=jy
+        meq[6]=-jy
+        meq[7]=(jx**2-jy**2)
+        meq[8]=jx*jy
+
+        meq*=rho
+        return meq
+    
+
+    @ti.func
+    def m_force(self,F,vel):
+        mforce=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        Fu=tm.dot(F,vel)
+
+        mforce[1]=6*Fu
+        mforce[2]=-6*Fu
+        mforce[3]=F[0]
+        mforce[4]=-F[0]
+        mforce[5]=F[1]
+        mforce[6]=-F[1]
+        mforce[7]=2*(F[0]*vel.x-F[1]*vel.y)
+        mforce[8]=F[1]*vel.x+F[0]*vel.y
+
+        return mforce
+    
     @ti.kernel#LBM solve
-    def BGKCollide(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
-        for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
-
-            feqeq=lb_filed.f_eq(i, j)
-            force_ij=lb_filed.f_force(i,j)
-
-            CollisionOperator =-self.omega*(lb_filed.f[i,j]-feqeq)
-            ForceTerm=(1.0-0.5*self.omega)*force_ij
-
-            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
-
-
-    @ti.kernel#LBM solve
-    def TRTCollide(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
-        for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
-
-            feqeq=lb_filed.f_eq(i, j)
-            force_ij=lb_filed.f_force(i,j)
-
-            #symmetrical and antisymmetrical particle distribution functions
-            f_sym=lb_filed.f_sym(i,j)
-            feq_sym=lb_filed.feq_sym(feqeq)
-            force_sym=lb_filed.force_sym(force_ij)
-
-            f_antisym=lb_filed.f[i,j]-f_sym
-            feq_antisym=feqeq-feq_sym
-            force_antisym=force_ij-force_sym
-
-            CollisionOperator =-self.omega_sym * (f_sym-feq_sym)-self.omega_antisym*(f_antisym-feq_antisym)
-            ForceTerm=(1.0-0.5*self.omega_sym)*force_sym+(1.0-0.5*self.omega_antisym)*force_antisym
-            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
-
-    @ti.kernel#LBM solve
-    def MRTCollide(self,lb_filed:ti.template()):
+    def Collision(self,lb_filed:ti.template()):
         count_FluidGroup=lb_filed.count_FluidGroup[None]
         for id in range(count_FluidGroup):
             i,j = lb_filed.boundaryGroup_Fluid[id]
@@ -687,8 +668,8 @@ class CollisionEngine:
                 for jj in ti.static(range(9)):
                     m[ii]+=self.M[ii,jj]*lb_filed.f[i,j][jj]
 
-            meq=lb_filed.m_eq(i,j) #Compute equilibrium moments
-            mf=lb_filed.m_force(i,j) #Guo Forcing
+            meq=self.m_eq(lb_filed.vel[i,j],lb_filed.rho[i,j]) #Compute equilibrium moments
+            mf=self.m_force(lb_filed.bodyForce[i,j],lb_filed.vel[i,j]) #Guo Forcing
 
             for ii in ti.static(range(9)):
                 a[ii]=self.diag[ii]*(m[ii]-meq[ii])
@@ -703,8 +684,46 @@ class CollisionEngine:
 
             lb_filed.f2[i,j]=fpop2
 
+@ti.data_oriented
+class HuangMRTCollision(MRTCollision):
+    def __init__(self):
+        super().__init__()
+        self.k1=1.0
+        self.k2=1.0
+        self.gA=-5.0
+        self.rho0=1.0 
+        self.rho_cr=tm.log(2.0)
+        self.rho_liq=1.95
+        self.rho_gas=0.15
+        self.solidCof=0.5
+        self.rho_solid=self.rho_gas+self.solidCof*(self.rho_liq-self.rho_gas)
+
+    def ShanChenSetting(self,rho_liq=1.95,rho_gas=0.15,rho_solid_cof=0.9,gA=-5.0):
+        self.rho_liq=rho_liq
+        self.rho_gas=rho_gas
+        self.rho_solid=self.rho_gas+rho_solid_cof*(self.rho_liq-self.rho_gas)
+        self.gA=gA
+
+    @ti.func
+    def psi(self,dens):
+        return self.rho0*(1.0-tm.exp(-dens/self.rho0))
+
+    @ti.func
+    def m_Q(self,F,rho):
+        Qm=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        F2=tm.dot(F,F)
+        a=3*(self.k1+2*self.k2)*F2
+        b=self.gA*self.psi(rho)**2
+        
+        Qm[1]=a/b
+        Qm[2]=-Qm[1]
+        Qm[7]=self.k1*(F[0]**2-F[1]**2)/b
+        Qm[8]=self.k1*F[0]*F[1]/b
+
+        return Qm
+    
     @ti.kernel
-    def HuangMRTCollide(self,lb_filed:ti.template()):
+    def Collision(self,lb_filed:ti.template()):
         count_FluidGroup=lb_filed.count_FluidGroup[None]
         for id in range(count_FluidGroup):
             i,j = lb_filed.boundaryGroup_Fluid[id]
@@ -720,9 +739,9 @@ class CollisionEngine:
                 for jj in ti.static(range(9)):
                     ti.atomic_add(m[ii],self.M[ii,jj]*lb_filed.f[i,j][jj])
 
-            meq=lb_filed.m_eq(i,j) #Compute equilibrium moments
-            mf=lb_filed.m_force(i,j) #Guo Forcing
-            mQ=lb_filed.m_Q(i,j) # huang
+            meq=self.m_eq(lb_filed.vel[i,j],lb_filed.rho[i,j]) #Compute equilibrium moments
+            mf=self.m_force(lb_filed.bodyForce[i,j],lb_filed.vel[i,j]) #Guo Forcing
+            mQ=self.m_Q(lb_filed.bodyForce[i,j],lb_filed.rho[i,j]) # huang
 
             for ii in ti.static(range(9)):
                 a[ii]=self.diag[ii]*(m[ii]-meq[ii])
@@ -737,34 +756,6 @@ class CollisionEngine:
                     ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
 
             lb_filed.f2[i,j]=fpop2
-
-@ti.data_oriented
-class StreamEngine:
-
-    @ti.kernel
-    def StreamInside(self,lb_filed:ti.template()):
-        #stream in InsideGroup
-        count_InsideGroup=lb_filed.count_InsideGroup[None]
-        for m in range(count_InsideGroup):
-            i,j =lb_filed.boundaryGroup_Inside[m]
-            for k in ti.static(range(lb_filed.NPOP)):
-                ix2=lb_filed.Neighbordata[i,j][k,0]
-                iy2=lb_filed.Neighbordata[i,j][k,1]
-                lb_filed.f[i,j][k]=lb_filed.f2[ix2,iy2][k]
-
-
-    @ti.kernel
-    def StreamPeriodic(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
-        for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
-            for k in ti.static(range(lb_filed.NPOP)):
-                x2=(i-lb_filed.c[k,0]+lb_filed.NX)%lb_filed.NX 
-                y2=(j-lb_filed.c[k,1]+lb_filed.NY)%lb_filed.NY
-                lb_filed.f[i,j][k]=lb_filed.f2[x2,y2][k]
-
-@ti.data_oriented
-class ShanChenEngine:
 
     @ti.kernel
     def computeSCForces(self,lb_filed:ti.template()):
@@ -801,3 +792,29 @@ class ShanChenEngine:
 
             ti.atomic_add(lb_filed.SCforce[i,j].x,f_temp_x)
             ti.atomic_add(lb_filed.SCforce[i,j].y,f_temp_y)
+
+@ti.data_oriented
+class StreamEngine:
+    @ti.kernel
+    def StreamInside(self,lb_filed:ti.template()):
+        #stream in InsideGroup
+        count_InsideGroup=lb_filed.count_InsideGroup[None]
+        for m in range(count_InsideGroup):
+            i,j =lb_filed.boundaryGroup_Inside[m]
+            for k in ti.static(range(lb_filed.NPOP)):
+                ix2=lb_filed.Neighbordata[i,j][k,0]
+                iy2=lb_filed.Neighbordata[i,j][k,1]
+                lb_filed.f[i,j][k]=lb_filed.f2[ix2,iy2][k]
+
+
+    @ti.kernel
+    def StreamPeriodic(self,lb_filed:ti.template()):
+        count_FluidGroup=lb_filed.count_FluidGroup[None]
+        for m in range(count_FluidGroup):
+            i,j = lb_filed.boundaryGroup_Fluid[m]
+            for k in ti.static(range(lb_filed.NPOP)):
+                x2=(i-lb_filed.c[k,0]+lb_filed.NX)%lb_filed.NX 
+                y2=(j-lb_filed.c[k,1]+lb_filed.NY)%lb_filed.NY
+                lb_filed.f[i,j][k]=lb_filed.f2[x2,y2][k]
+
+
