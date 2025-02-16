@@ -2,6 +2,7 @@
 import numpy as np
 import taichi as ti
 import openLBM
+import openIBM
 import numpy as np
 from matplotlib import cm
 import time
@@ -85,14 +86,14 @@ rho_lnlet=1+pressure_lnlet*3/C_pressure
 #==============================================
 name="test"
 lb_field=openLBM.LBField(name,NX_LB,NY_LB)
-lb_field.BoundaryInfo(InletMode=1,vel_Inlet=ti.Vector([Ux_LB,Uy_LB]))
+lb_field.BoundaryInfo(InletMode=1,vel_Inlet=ti.Vector([Ux_LB,Uy_LB]),rho_Inlet=rho_lnlet)
 
 #post pars
 lb_field.conversion_coefficient(Cu_py=Cu,C_pressure_py=C_pressure)
 #==============================================
 boundary_engine=openLBM.BoundaryEngine()
-boundary_engine.Mask_rectangle_identify(lb_field,p6[0]/Cl-0.5,p2[0]/Cl-0.5,p6[1]/Cl-0.5,p2[1]/Cl-0.5)
-boundary_engine.Mask_rectangle_identify(lb_field,p4[0]/Cl-0.5,p8[0]/Cl-0.5,p4[1]/Cl-0.5,p8[1]/Cl-0.5)
+# boundary_engine.Mask_rectangle_identify(lb_field,p6[0]/Cl-0.5,p2[0]/Cl-0.5,p6[1]/Cl-0.5,p2[1]/Cl-0.5)
+# boundary_engine.Mask_rectangle_identify(lb_field,p4[0]/Cl-0.5,p8[0]/Cl-0.5,p4[1]/Cl-0.5,p8[1]/Cl-0.5)
 boundary_engine.Boundary_identify(lb_field)
 boundary_engine.writing_boundary(lb_field)
 
@@ -110,28 +111,47 @@ collision_engine.Relaxation_pars(omega_sym=omega_sym_LB,omega_antisym=omega_anti
 # collision_engine.Relaxation_pars(omega_v=omega_v,omega_e=omega_e,omega_q=omega_q,omega_epsilon=omega_epsilon)#MRT
 
 #==============================================
+number=1
+id_np=arr = np.arange(0,number, 1) 
+pos_np = np.array([[100,120]]).astype(np.float32)
+vel_np = np.array([[0,0]]).astype(np.float32)
+force_np=np.array([[0,0]]).astype(np.float32)
+torque_np= np.array([0]).astype(np.float32)
+radius_np = np.array([20]).astype(np.float32)
+angle_np=np.array([0]).astype(np.float32)
 
-lb_field.init_hydro()
-lb_field.init_LBM(collision_engine)
-
-
+ball_field=openIBM.SphereIB(100,50)
+ball_field.init_Balls(number,id_np,pos_np,vel_np,radius_np,angle_np)
+ball_field.init_IB_nodes()
 #==============================================
 stream_engine=openLBM.StreamEngine()
-
+#==============================================
+lb_field.init_simulation(sphere_field=ball_field)
+lb_field.init_LBM(collsion=collision_engine)
+#==============================================
+MDFIteration=3
+ib_engine=openIBM.IBEngine(MDFIteration)
+#==============================================
+ibdem_engine=openIBM.IBDEMCouplerEngine(lb_field)
 #==============================================solve & show
 
 start_time = time.time()
 gui = ti.GUI(name, (NX_LB,2*NY_LB)) 
 
 while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-# for i in range (10):
-    for j in range(20):
+# for i in range (5):
+    for j in range(10):
+        ibdem_engine.SphereInfoUpdata(ball_field,pos_np,vel_np,angle_np)
+        ibdem_engine.SphereIBUpdate(ball_field)
 
         # LBM SOLVE
         macroscopic_engine.computeDensity(lb_field)
         macroscopic_engine.computerForceDensity(lb_field)
         macroscopic_engine.computeVelocity(lb_field)
         
+        ib_engine.MultiDirectForcingLoop(ball_field,lb_field)
+        ib_engine.ComputeParticleForce(sphere_field=ball_field)
+
         collision_engine.Collision(lb_field)
 
         stream_engine.StreamInside(lb_field)
@@ -140,16 +160,18 @@ while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
         boundary_engine.BounceBackInlet(lb_field)
         boundary_engine.BounceBackOutlet(lb_field)
 
-        
+        print(ibdem_engine.GetSphereForce(ball_field))
+    
     pressure = cm.coolwarm(lb_field.post_pressure())
-    vel_img = cm.plasma(lb_field.post_vel()/0.15)
+    vel_img = cm.plasma(lb_field.post_vel()/0.05)
     img = np.concatenate((pressure, vel_img), axis=1)
 
     gui.set_image(img)
     gui.show()
 
-    # filename="test"+'%d' % i
-    # global_engine.writeVTK(filename,lb_field)
-    # end_time = time.time()
-    # elapsed_time = (end_time - start_time)
-    # print({elapsed_time})
+    # # time.sleep(0.2)
+#     filename="test"+'%d' % i
+#     lb_field.writeVTK(filename)
+#     end_time = time.time()
+#     elapsed_time = (end_time - start_time)
+#     print({elapsed_time})

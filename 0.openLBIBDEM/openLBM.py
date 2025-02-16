@@ -96,9 +96,106 @@ class LBField:
         vel = self.vel.to_numpy()
         vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
         return vel_mag
+    
+    def writeVTK(self,fname):
+        rho=self.rho.to_numpy().T.flatten()  
+        vel=self.vel.to_numpy()
+        velx=vel[:,:,0].T.flatten()  
+        vely=vel[:,:,1].T.flatten()  
+
+        bodyforce=self.bodyForce.to_numpy()
+        bodyforcex=bodyforce[:,:,0].T.flatten()
+        bodyforcey=bodyforce[:,:,1].T.flatten()
+
+        x_coords = np.arange(self.NX)  
+        y_coords = np.arange(self.NY)  
+        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  
+
+        x_flat = x_mesh.flatten()  
+        y_flat = y_mesh.flatten()  
 
 
+        filename = fname + ".vtk"  
+        with open(filename, 'w') as fout:  
+            fout.write("# vtk DataFile Version 3.0\n")  
+            fout.write("Hydrodynamics representation\n")  
+            fout.write("ASCII\n\n")  
+            fout.write("DATASET STRUCTURED_GRID\n")  
+            fout.write(f"DIMENSIONS {self.NX} {self.NY} 1\n")  
+            fout.write(f"POINTS {self.NX*self.NY} double\n")  
+          
+            np.savetxt(fout, np.column_stack((x_flat, y_flat, np.zeros_like(x_flat))), fmt='%.0f')  
+          
+            fout.write("\n")  
+            fout.write(f"POINT_DATA {self.NX*self.NY}\n")  
+          
+            fout.write("SCALARS Pressure double\n")  
+            fout.write("LOOKUP_TABLE Pressure_table\n")  
+            np.savetxt(fout, (rho - 1) * self.pressure_conversion/3.0, fmt='%.8f') 
 
+
+            fout.write("VECTORS velocity double\n")  
+            velocity_data = np.column_stack((velx * self.velcity_conversion, vely * self.velcity_conversion, np.zeros_like(velx)))  
+            np.savetxt(fout, velocity_data, fmt='%.8f') 
+  
+            fout.write("VECTORS f double\n")  
+            bodyforce = np.column_stack((bodyforcex, bodyforcey, np.zeros_like(bodyforcex)))  
+            np.savetxt(fout, bodyforce, fmt='%.8f') 
+
+        print(filename)
+
+    @ti.kernel 
+    def init_hydro_IB(self,sphere_field:ti.template()):
+        # 初始化球体区域
+        for n in range(sphere_field.num):
+            center_x = sphere_field.Sphere[n].pos.x
+            center_y = sphere_field.Sphere[n].pos.y
+            radius = sphere_field.Sphere[n].radius
+            radius_sq = radius ** 2
+
+            # 计算球体覆盖的网格范围
+            min_ix = int(ti.max(0, center_x - radius))
+            max_ix = int(ti.min(self.NX - 1, center_x + radius))
+            min_iy = int(ti.max(0, center_y - radius))
+            max_iy = int(ti.min(self.NY - 1, center_y + radius))
+
+            # 遍历球体覆盖的网格区域
+            for ix in range(min_ix, max_ix + 1):
+                for iy in range(min_iy, max_iy + 1):
+                    if (ix - center_x) ** 2 + (iy - center_y) ** 2 <= radius_sq:
+                        self.vel[ix, iy] = [0, 0]
+        print("init hydro IB")
+
+    @ti.kernel 
+    def init_hydro(self):
+        count_FluidGroup=self.count_FluidGroup[None]
+        if self.InletMode==1:
+            for m in range(count_FluidGroup):
+                ix,iy=self.boundaryGroup_Fluid[m]
+                self.vel[ix,iy]=self.vel_wall_Inlet
+                self.rho[ix,iy]=1.0
+        else:
+            for m in range(count_FluidGroup):
+                ix,iy=self.boundaryGroup_Fluid[m]
+                k=(1.0-self.rho_Inlet)/self.NX
+                self.vel[ix,iy]=self.vel_wall_Inlet
+                self.rho[ix,iy]=k*ix+self.rho_Inlet
+        print("init hydro")
+
+    def init_simulation(self,sphere_field:ti.template()=None):
+        self.init_hydro()
+        if sphere_field!=None:
+            self.init_hydro_IB(sphere_field)
+        
+
+    @ti.kernel
+    def init_LBM(self,collsion:ti.template()):
+        for i,j in ti.ndrange(self.NX, self.NY):
+            self.f[i,j]=self.f2[i,j]=collsion.f_eq(self.c,self.weights,self.vel[i,j],self.rho[i,j])
+        print("init LBM")
+
+
+    
 
 
 @ti.data_oriented
@@ -288,18 +385,18 @@ class BoundaryEngine:
                 i,j=lb_filed.boundaryGroup_Inlet[m]
                 ix2=lb_filed.Neighbordata[i,j][3,0]
                 iy2=lb_filed.Neighbordata[i,j][3,1]
-                lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-                lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
+                # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
+                # lb_filed.rho[i,j]=lb_filed.rho_Inlet
+                # lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
 
                 #ABC
-                # uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-                # lb_filed.vel[i,j]=uw
-                # lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                # ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],lb_filed.rho_Inlet,uw)
-                # lb_filed.f[i,j][1]=ftemp[1]
-                # lb_filed.f[i,j][5]=ftemp[5]
-                # lb_filed.f[i,j][8]=ftemp[8]
+                uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
+                lb_filed.vel[i,j]=uw
+                lb_filed.rho[i,j]=lb_filed.rho_Inlet
+                ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],lb_filed.rho_Inlet,uw)
+                lb_filed.f[i,j][1]=ftemp[1]
+                lb_filed.f[i,j][5]=ftemp[5]
+                lb_filed.f[i,j][8]=ftemp[8]
 
     @ti.kernel
     def BounceBackOutlet(self,lb_filed:ti.template()):
@@ -312,91 +409,21 @@ class BoundaryEngine:
             iy2=lb_filed.Neighbordata[i,j][1,1]
 
             #NEEM
-            lb_filed.rho[i,j]=1.0
-            lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-            lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
+            # lb_filed.rho[i,j]=1.0
+            # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
+            # lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
 
             #ABC
-            # uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-            # lb_filed.vel[i,j]=uw
-            # lb_filed.rho[i,j]=1.0
-            # ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],1.0,uw)
-            # lb_filed.f[i,j][3]=ftemp[3]
-            # lb_filed.f[i,j][6]=ftemp[6]
-            # lb_filed.f[i,j][7]=ftemp[7]
-
-@ti.data_oriented
-class GlobalEngine:
-    @ti.kernel 
-    def init_hydro(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
-        if lb_filed.InletMode==1:
-            for m in range(count_FluidGroup):
-                ix,iy=lb_filed.boundaryGroup_Fluid[m]
-                lb_filed.vel[ix,iy]=lb_filed.vel_wall_Inlet
-                lb_filed.rho[ix,iy]=1.0
-        else:
-            for m in range(count_FluidGroup):
-                ix,iy=lb_filed.boundaryGroup_Fluid[m]
-                k=(1.0-lb_filed.rho_Inlet)/lb_filed.NX
-                lb_filed.vel[ix,iy]=lb_filed.vel_wall_Inlet
-                lb_filed.rho[ix,iy]=k*ix+lb_filed.rho_Inlet
-        print("init hydyo")
+            uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
+            lb_filed.vel[i,j]=uw
+            lb_filed.rho[i,j]=1.0
+            ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],1.0,uw)
+            lb_filed.f[i,j][3]=ftemp[3]
+            lb_filed.f[i,j][6]=ftemp[6]
+            lb_filed.f[i,j][7]=ftemp[7]
 
 
-    @ti.kernel
-    def init_LBM(self,lb_filed:ti.template(),collsion:ti.template()):
-        for i,j in ti.ndrange(lb_filed.NX, lb_filed.NY):
-            lb_filed.f[i,j]=lb_filed.f2[i,j]=collsion.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
-        print("init LBM")
 
-
-    def writeVTK(self,fname,lb_filed:ti.template()):
-        rho=lb_filed.rho.to_numpy().T.flatten()  
-        vel=lb_filed.vel.to_numpy()
-        velx=vel[:,:,0].T.flatten()  
-        vely=vel[:,:,1].T.flatten()  
-
-        bodyforce=lb_filed.bodyForce.to_numpy()
-        bodyforcex=bodyforce[:,:,0].T.flatten()
-        bodyforcey=bodyforce[:,:,1].T.flatten()
-
-        x_coords = np.arange(lb_filed.NX)  
-        y_coords = np.arange(lb_filed.NY)  
-        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  
-
-        x_flat = x_mesh.flatten()  
-        y_flat = y_mesh.flatten()  
-
-
-        filename = fname + ".vtk"  
-        with open(filename, 'w') as fout:  
-            fout.write("# vtk DataFile Version 3.0\n")  
-            fout.write("Hydrodynamics representation\n")  
-            fout.write("ASCII\n\n")  
-            fout.write("DATASET STRUCTURED_GRID\n")  
-            fout.write(f"DIMENSIONS {lb_filed.NX} {lb_filed.NY} 1\n")  
-            fout.write(f"POINTS {lb_filed.NX*lb_filed.NY} double\n")  
-          
-            np.savetxt(fout, np.column_stack((x_flat, y_flat, np.zeros_like(x_flat))), fmt='%.0f')  
-          
-            fout.write("\n")  
-            fout.write(f"POINT_DATA {lb_filed.NX*lb_filed.NY}\n")  
-          
-            fout.write("SCALARS Pressure double\n")  
-            fout.write("LOOKUP_TABLE Pressure_table\n")  
-            np.savetxt(fout, (rho - 1) * lb_filed.pressure_conversion/3.0, fmt='%.8f') 
-
-
-            fout.write("VECTORS velocity double\n")  
-            velocity_data = np.column_stack((velx * lb_filed.velcity_conversion, vely * lb_filed.velcity_conversion, np.zeros_like(velx)))  
-            np.savetxt(fout, velocity_data, fmt='%.8f') 
-  
-            fout.write("VECTORS f double\n")  
-            bodyforce = np.column_stack((bodyforcex, bodyforcey, np.zeros_like(bodyforcex)))  
-            np.savetxt(fout, bodyforce, fmt='%.8f') 
-
-        print(filename)
 
 
 

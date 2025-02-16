@@ -4,110 +4,154 @@ import numpy as np
 import math
 
 
+@ti.dataclass
+class IBMNodes:
+    pos: ti.math.vec2
+    vel: ti.math.vec2
+    vel_desired: ti.math.vec2
+    force: ti.math.vec2
+    force_temp: ti.math.vec2
+    mask_insiderDomain:int
+
+@ti.dataclass
+class Sphere():
+    id: int
+    pos: ti.math.vec2
+    vel: ti.math.vec2
+    force: ti.math.vec2
+    torque: float
+    radius: float
+    angle: float
+    NumIB:int
+
+
 @ti.data_oriented
-class Sphere:
-    def __init__(self,particles_max_Number,particles_max_NUMIB):
-        self.particles_max_Number=particles_max_Number
-        self.particles_num=0
-        self.particles_id=ti.field(int,shape=(particles_max_Number))
-        self.particles_pos=ti.Vector.field(2,float,shape=(particles_max_Number))
-        self.particles_vel=ti.Vector.field(2,float,shape=(particles_max_Number))
-        self.particles_force=ti.Vector.field(2,float,shape=(particles_max_Number))
-        self.particles_torque=ti.field(float,shape=(particles_max_Number))
-        self.particles_radius=ti.field(float,shape=(particles_max_Number))
-        self.particles_angle=ti.field(float,shape=(particles_max_Number))
+class SphereIB():
+    def __init__(self,Max_Number,Max_NumIB):
+        self.Max_Number=Max_Number
+        self.num=0
+        self.Sphere=Sphere.field(shape=(Max_Number))
 
-        self.particles_max_NUMIB=particles_max_NUMIB
+        self.Max_NumIB=Max_NumIB
         self.NUMIB_cof=1
-        self.particles_IB_nodes_NUMIB=ti.field(int,shape=(particles_max_Number))
-        self.particles_IB_nodes_pos=ti.Vector.field(2,float,shape=(particles_max_Number,particles_max_NUMIB))
-        self.particles_IB_nodes_vel=ti.Vector.field(2,float,shape=(particles_max_Number,particles_max_NUMIB))
-        self.particles_IB_nodes_vel_desired=ti.Vector.field(2,float,shape=(particles_max_Number,particles_max_NUMIB))
-        self.particles_IB_nodes_force=ti.Vector.field(2,float,shape=(particles_max_Number,particles_max_NUMIB))
-        self.particles_IB_nodes_force_temp=ti.Vector.field(2,float,shape=(particles_max_Number,particles_max_NUMIB))
+        self.IBNodes=IBMNodes.field(shape=(Max_Number,Max_NumIB))
 
-        self.particles_IB_nodes_mask_insiderDomain=ti.field(int,shape=(particles_max_Number,particles_max_NUMIB))
-        self.particles_IB_nodes_mask_insiderGroup=ti.Vector.field(2,int,shape=(particles_max_Number*particles_max_NUMIB))
-        self.particles_IB_nodes_mask_insiderCount=ti.field(int,shape=())
+        self.IBNodeInsiderGroup=ti.Vector.field(2,int,shape=(Max_Number*Max_NumIB))
+        self.IBInsiderCount=ti.field(int,shape=())
 
 
-    def init_Balls(self,particles_num,id_np,pos_np,radius_np,angle_np):
-        self.particles_num=particles_num
-        self.particles_id.from_numpy(id_np)
-        self.particles_pos.from_numpy(pos_np)
-        self.particles_radius.from_numpy(radius_np)
-        self.particles_angle.from_numpy(angle_np)
-        print("init Balls")
+    def init_Balls(self, num, id_np, pos_np, vel_np, radius_np, angle_np):
+        self.num = num
+        for  m in range(self.num):
+            self.Sphere[m].id = id_np[m]
+            self.Sphere[m].pos = pos_np[m]
+            self.Sphere[m].vel = vel_np[m]
+            # self.Sphere[m].force = force_np[m]
+            # self.Sphere[m].torque = torque_np[m]
+            self.Sphere[m].radius = radius_np[m]
+            self.Sphere[m].angle = angle_np[m]
+        print("init balls")
+
 
     @ti.kernel
     def init_IB_nodes(self):
-        for m in range(self.particles_num):
-            self.particles_IB_nodes_NUMIB[m]= int(round(tm.pi * 2 * self.particles_radius[m] / self.NUMIB_cof))
-            for n in range(self.particles_IB_nodes_NUMIB[m]):
-                angle = 2.0 * math.pi * n / self.particles_IB_nodes_NUMIB[m]
-                self.particles_IB_nodes_pos[m,n].x=self.particles_pos[m].x+self.particles_radius[m]*tm.cos(angle)
-                self.particles_IB_nodes_pos[m,n].y=self.particles_pos[m].y+self.particles_radius[m]*tm.sin(angle)
+        for m in range(self.num):
+            self.Sphere[m].NumIB= int(ti.round(tm.pi * 2 * self.Sphere[m].radius / self.NUMIB_cof))
+            for n in range(self.Sphere[m].NumIB):
+                angle = 2.0 * math.pi * n / self.Sphere[m].NumIB
+                self.IBNodes[m,n].pos.x=self.Sphere[m].pos.x+self.Sphere[m].radius*tm.cos(angle)
+                self.IBNodes[m,n].pos.y=self.Sphere[m].pos.y+self.Sphere[m].radius*tm.sin(angle)
         print("init IB nodes")
 
+    @ti.func
+    def computer_IB_nodes_pos(self,m,n):
+        pos=ti.Vector([0.0,0.0])
+        angle = 2.0 * math.pi * n / self.Sphere[m].NumIB
+        xref=self.Sphere[m].radius*tm.cos(angle) 
+        yref=self.Sphere[m].radius*tm.sin(angle)
+
+        pos[0]=self.Sphere[m].pos.x+xref*tm.cos(self.Sphere[m].angle)-yref*tm.sin(self.Sphere[m].angle)
+        pos[1]=self.Sphere[m].pos.y+xref*tm.sin(self.Sphere[m].angle)+yref*tm.cos(self.Sphere[m].angle)
+        return pos
+    
+    @ti.kernel
+    def reset_force(self):
+        for m,n in self.IBNodes:
+            self.IBNodes[m,n].force=ti.Vector([0.0,0.0])
+    
+
+@ti.data_oriented
+class IBDEMCouplerEngine():
+    def __init__(self,lb_field:ti.template()):
+        self.NX=lb_field.NX
+        self.NY=lb_field.NY
 
     @ti.func
-    def CheckPos(self,pos,diameter):
-        posflag=2 #cross
-        if pos.x-diameter>0 and pos.x+diameter<self.NX-1 and pos.y-diameter>0 and pos.y+diameter<=self.NY-1:
-            posflag=1 #inside
-        elif pos.x+diameter<0 or pos.x-diameter>self.NX-1 or pos.y+diameter<0 or pos.y-diameter>self.NY-1:
-            posflag=0 #outside
+    def CheckPos(self, pos, diameter):
+        posflag = 2  #cross
+        x_min = pos.x - diameter
+        x_max = pos.x + diameter
+        y_min = pos.y - diameter
+        y_max = pos.y + diameter
+        nx = self.NX - 1
+        ny = self.NY - 1
+
+        #inside
+        if x_min >= 0 and x_max <= nx and y_min >= 0 and y_max <= ny:
+            posflag = 1
+        #outside
+        elif x_max < 0 or x_min > nx or y_max < 0 or y_min > ny:
+            posflag = 0
         return posflag
-    
+
+
     @ti.func
     def InDomain(self,pos):
         flag=0
         if pos.x>0 and pos.x<self.NX-1 and pos.y>0 and pos.y<self.NY-1:
             flag=1
         return flag
-
-    @ti.func
-    def computer_IB_nodes_pos(self,m,n):
-        pos=ti.Vector([0.0,0.0])
-        angle = 2.0 * math.pi * n / self.particles_IB_nodes_NUMIB[m]
-        xref=self.particles_radius[m]*tm.cos(angle) 
-        yref=self.particles_radius[m]*tm.sin(angle)
-
-        pos[0]=self.particles_pos[m].x+xref*tm.cos(self.particles_angle[m])-yref*tm.sin(self.particles_angle[m])
-        pos[1]=self.particles_pos[m].y+xref*tm.sin(self.particles_angle[m])+yref*tm.cos(self.particles_angle[m])
-        return pos
     
-
-@ti.data_oriented
-class IBDEMCouplerEngine():
     @ti.kernel
-    def SphereIBUpdate(sphere_field:ti.template()):
+    def SphereIBUpdate(self,sphere_field:ti.template()):
 
-        sphere_field.particles_IB_nodes_mask_insiderGroup.fill([0,0])
-        sphere_field.particles_IB_nodes_mask_insiderCount[None]=0
+        sphere_field.IBNodeInsiderGroup.fill([0,0])
+        sphere_field.IBInsiderCount[None]=0
 
-
-        for m in ti.static(range(sphere_field.particles_num)):
-            posflag=sphere_field.CheckPos(sphere_field.particles_pos[m],2*sphere_field.particles_radius[m])
+        for m in ti.static(range(sphere_field.num)):
+            posflag=self.CheckPos(sphere_field.Sphere[m].pos,2*sphere_field.Sphere[m].radius)
             if posflag==1:#inside
-                for n in ti.static(range(sphere_field.particles_IB_nodes_NUMIB[m])):
-                    sphere_field.particles_IB_nodes_pos[m,n]=sphere_field.computer_IB_nodes_pos(m,n)
-                    sphere_field.particles_IB_nodes_vel_desired[m,n]=sphere_field.particles_vel[m]
-                    idx=ti.atomic_add(sphere_field.particles_IB_nodes_mask_insiderCount[None],1)
-                    sphere_field.particles_IB_nodes_mask_insiderGroup[idx]=ti.Vector([m,n])
+                for n in range(sphere_field.Sphere[m].NumIB):
+                    sphere_field.IBNodes[m,n].pos=sphere_field.computer_IB_nodes_pos(m,n)
+                    sphere_field.IBNodes[m,n].vel_desired=sphere_field.Sphere[m].vel
+                    idx=ti.atomic_add(sphere_field.IBInsiderCount[None],1)
+                    sphere_field.IBNodeInsiderGroup[idx]=ti.Vector([m,n])
 
             elif posflag==2:#cross
-                for n in ti.static(range(sphere_field.particles_IB_nodes_NUMIB[m])):
-                    sphere_field.particles_IB_nodes_pos[m,n]=sphere_field.computer_IB_nodes_pos(m,n)
-                    sphere_field.particles_IB_nodes_vel_desired[m,n]=sphere_field.particles_vel[m]
-                    if sphere_field.InDomain(sphere_field.particles_IB_nodes_pos[m,n]):
-                        idx=ti.atomic_add(sphere_field.particles_IB_nodes_mask_insiderCount[None],1)
-                        sphere_field.particles_IB_nodes_mask_insiderGroup[idx]=ti.Vector([m,n])
+                for n in range(sphere_field.Sphere[m].NumIB):
+                    sphere_field.IBNodes[m,n].pos=sphere_field.computer_IB_nodes_pos(m,n)
+                    sphere_field.IBNodes[m,n].vel_desired=sphere_field.Sphere[m].vel
+                    if self.InDomain(sphere_field.IBNodes[m,n].pos):
+                        idx=ti.atomic_add(sphere_field.IBInsiderCount[None],1)
+                        sphere_field.IBNodeInsiderGroup[idx]=ti.Vector([m,n])
                 
-    def SphereUpdata(self,sphere_field:ti.template(),pos_np,vel_np,angle_np):
-        sphere_field.particles_pos.from_numpy(pos_np)
-        sphere_field.particles_vel.from_numpy(vel_np)
-        sphere_field.particles_angle.from_numpy(angle_np)
+    def SphereInfoUpdata(self,sphere_field:ti.template(),pos_np,vel_np,angle_np):
+        for m in range(sphere_field.num):
+            sphere_field.Sphere[m].pos=pos_np[m]
+            sphere_field.Sphere[m].vel=vel_np[m]
+            sphere_field.Sphere[m].angle=angle_np[m]
+
+    def GetSphereForce(self,sphere_field:ti.template()):
+        force_data = sphere_field.Sphere.force.to_numpy() 
+        force_matrix = force_data[:sphere_field.num, :]
+        return force_matrix
+
+    def GetSphereTorque(self,sphere_field:ti.template()):
+        torque_data = sphere_field.Sphere.torque.to_numpy()
+        num_spheres = sphere_field.num[None]
+        torque_matrix = torque_data[:num_spheres]
+        return torque_matrix
+
 
 
 
@@ -118,23 +162,23 @@ class IBEngine():
 
     @ti.kernel#IB solve
     def ComputeParticleForce(self,sphere_field:ti.template()):
-        particles_IB_nodes_mask_insiderCount=sphere_field.particles_IB_nodes_mask_insiderCount[None]
-        for idx in range(particles_IB_nodes_mask_insiderCount):
-            m,n=sphere_field.particles_IB_nodes_mask_insiderGroup[idx]
+        IBInsiderCount=sphere_field.IBInsiderCount[None]
+        for idx in range(IBInsiderCount):
+            m,n=sphere_field.IBNodeInsiderGroup[idx]
             #reset force
-            sphere_field.particles_torque[m]=0.0
-            sphere_field.particles_force[m]=ti.Vector([0.0,0.0])
+            sphere_field.Sphere[m].torque=0.0
+            sphere_field.Sphere[m].force=ti.Vector([0.0,0.0])
 
-            fx,fy=sphere_field.particles_IB_nodes_force[m,n]
-            rx,ry=sphere_field.particles_IB_nodes_pos[m,n]-sphere_field.particles_pos[m]
+            fx,fy=sphere_field.IBNodes[m,n].force
+            rx,ry=sphere_field.IBNodes[m,n].pos-sphere_field.Sphere[m].pos
 
-            sphere_field.particles_torque[m]+=fx*ry-fy*rx
-            sphere_field.particles_force[m].x+=fx
-            sphere_field.particles_force[m].y+=fy
+            sphere_field.Sphere[m].torque+=fx*ry-fy*rx
+            sphere_field.Sphere[m].force.x+=fx
+            sphere_field.Sphere[m].force.y+=fy
 
     @ti.func
     def BottomAndTop(self,pos):
-        posArray=ti.Vector([0.0,0.0,0.0,0.0])
+        posArray=ti.Vector([0,0,0,0])
         posArray[0]=ti.cast(tm.floor(pos.x),int)
         posArray[1]=ti.cast(tm.floor(pos.y),int)
         posArray[2]=ti.cast(tm.ceil(pos.x),int)
@@ -148,50 +192,54 @@ class IBEngine():
 
     @ti.kernel#IB solve
     def InterpolateParticleVelocities(self,sphere_field:ti.template(),lb_filed:ti.template()):
-        particles_IB_nodes_mask_insiderCount=sphere_field.particles_IB_nodes_mask_insiderCount[None]
-        for idx in range(particles_IB_nodes_mask_insiderCount):
-            m,n=sphere_field.particles_IB_nodes_mask_insiderGroup[idx]
+        IBInsiderCount=sphere_field.IBInsiderCount[None]
+        for idx in range(IBInsiderCount):
+            m,n=sphere_field.IBNodeInsiderGroup[idx]
             #reset vel
-            sphere_field.particles_IB_nodes_vel[m,n]=ti.Vector([0.0,0.0])
+            sphere_field.IBNodes[m,n].vel=ti.Vector([0.0,0.0])
 
             # Identify the lowest fluid lattice node in interpolation range (see spreading).
-            xbottom,ybottom,xtop,ytop=self.BottomAndTop(sphere_field.particles_IB_nodes_pos[m,n])
+            xbottom,ybottom,xtop,ytop=self.BottomAndTop(sphere_field.IBNodes[m,n].pos)
 
             for iX, iY in ti.ndrange((xbottom, xtop + 1), (ybottom, ytop + 1)): 
                 # Compute distance between object node and fluid lattice node.
 			    # Compute interpolation weights for x- and y-direction based on the distance.
-                weight=self.weight(sphere_field.particles_IB_nodes_pos[m,n],iX,iY)
+                weight=self.weight(sphere_field.IBNodes[m,n].pos,iX,iY)
 
                 # Compute node velocities.
-                sphere_field.particles_IB_nodes_vel[m,n]+=lb_filed.vel[iX,iY]*weight
+                sphere_field.IBNodes[m,n].vel+=lb_filed.vel[iX,iY]*weight
 
             # Compute the Lagrangian correction force
-            ForceCorrection=2*(sphere_field.particles_IB_nodes_vel_desired[m,n]-sphere_field.particles_IB_nodes_vel[m,n])
-            sphere_field.particles_IB_nodes_force_temp[m,n]=ForceCorrection
-            sphere_field.particles_IB_nodes_force[m,n]+=ForceCorrection
+            ForceCorrection=2*(sphere_field.IBNodes[m,n].vel_desired-sphere_field.IBNodes[m,n].vel)
+            sphere_field.IBNodes[m,n].force_temp=ForceCorrection
+            sphere_field.IBNodes[m,n].force+=ForceCorrection
 
     @ti.kernel#IB solve
     def SpreadParticleForces(self,sphere_field:ti.template(),lb_filed:ti.template()):
         #spread forces
-        particles_IB_nodes_mask_insiderCount=sphere_field.particles_IB_nodes_mask_insiderCount[None]
-        for idx in range(particles_IB_nodes_mask_insiderCount):
-            m,n=sphere_field.particles_IB_nodes_mask_insiderGroup[idx]
+        IBInsiderCount=sphere_field.IBInsiderCount[None]
+        for idx in range(IBInsiderCount):
+            m,n=sphere_field.IBNodeInsiderGroup[idx]
 
-            xbottom,ybottom,xtop,ytop=self.BottomAndTop(sphere_field.particles_IB_nodes_pos[m,n])
+            xbottom,ybottom,xtop,ytop=self.BottomAndTop(sphere_field.IBNodes[m,n].pos)
 
             for iX, iY in ti.ndrange((xbottom, xtop + 1), (ybottom, ytop + 1)): 
                 # Compute interpolation weights for x- and y-direction based on the distance.
-                weight=self.weight(sphere_field.particles_IB_nodes_pos[m,n],iX,iY)
+                weight=self.weight(sphere_field.IBNodes[m,n].pos,iX,iY)
                 #Compute lattice force.
                 f_temp=ti.Vector([0.0,0.0])
-                f_temp+=sphere_field.particles_IB_nodes_force_temp[m,n]*weight
+                f_temp+=sphere_field.IBNodes[m,n].force_temp*weight
                 #Correct previous Eulerian velocity
                 r2=lb_filed.rho[iX,iY]*2
                 lb_filed.vel[iX,iY]+=f_temp/r2
                 lb_filed.bodyForce[iX,iY]+=f_temp
 
+
+
     def MultiDirectForcingLoop(self,sphere_field:ti.template(),lb_filed:ti.template()):
-        sphere_field.particles_IB_nodes_force.fill([0,0])
+        #reset force
+        sphere_field.reset_force()
+
         for m in range(self.MDFIteration):
             self.InterpolateParticleVelocities(sphere_field=sphere_field,lb_filed=lb_filed)
             self.SpreadParticleForces(sphere_field=sphere_field,lb_filed=lb_filed)
