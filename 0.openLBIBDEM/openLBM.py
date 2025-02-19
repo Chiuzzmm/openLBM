@@ -147,7 +147,7 @@ class LBField:
     @ti.kernel 
     def init_hydro_IB(self,sphere_field:ti.template()):
         # 初始化球体区域
-        for n in range(sphere_field.num):
+        for n in range(sphere_field.num[None]):
             center_x = sphere_field.Sphere[n].pos.x
             center_y = sphere_field.Sphere[n].pos.y
             radius = sphere_field.Sphere[n].radius
@@ -172,7 +172,8 @@ class LBField:
         if self.InletMode==1:
             for m in range(count_FluidGroup):
                 ix,iy=self.boundaryGroup_Fluid[m]
-                self.vel[ix,iy]=self.vel_wall_Inlet
+                # self.vel[ix,iy]=self.vel_wall_Inlet
+                self.vel[ix,iy]=0.0
                 self.rho[ix,iy]=1.0
         else:
             for m in range(count_FluidGroup):
@@ -201,39 +202,39 @@ class LBField:
 @ti.data_oriented
 class BoundaryEngine:
     @ti.kernel
-    def Boundary_identify(self,lb_filed:ti.template()):
+    def Boundary_identify(self,lb_field:ti.template()):
         #Group identify
-        for ix,iy in lb_filed.mask:
-            if lb_filed.mask[ix,iy]!=-1:
+        for ix,iy in lb_field.mask:
+            if lb_field.mask[ix,iy]!=-1:
                 flag=0
-                lb_filed.mask_FluidGroup[ix,iy]=1
-                lb_filed.mask_InsideGroup[ix,iy]=1
+                lb_field.mask_FluidGroup[ix,iy]=1
+                lb_field.mask_InsideGroup[ix,iy]=1
 
-                for k in ti.static(range(lb_filed.NPOP)):
-                    ix2=ix-lb_filed.c[k,0]
-                    iy2=iy-lb_filed.c[k,1]
-                    if ix2<0 or ix2>lb_filed.NX-1 or iy2<0 or iy2>lb_filed.NY-1 or lb_filed.mask[ix2,iy2]==-1:
-                        lb_filed.Neighbordata[ix,iy][k,0]=-1
-                        lb_filed.Neighbordata[ix,iy][k,1]=-1
+                for k in ti.static(range(lb_field.NPOP)):
+                    ix2=ix-lb_field.c[k,0]
+                    iy2=iy-lb_field.c[k,1]
+                    if ix2<0 or ix2>lb_field.NX-1 or iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+                        lb_field.Neighbordata[ix,iy][k,0]=-1
+                        lb_field.Neighbordata[ix,iy][k,1]=-1
                         flag=1
                     else:
-                        lb_filed.Neighbordata[ix,iy][k,0]=ix2
-                        lb_filed.Neighbordata[ix,iy][k,1]=iy2
+                        lb_field.Neighbordata[ix,iy][k,0]=ix2
+                        lb_field.Neighbordata[ix,iy][k,1]=iy2
 
                 if flag==1:
-                    lb_filed.mask_WallGroup[ix,iy]=1
-                    lb_filed.mask_InsideGroup[ix,iy]=0
+                    lb_field.mask_WallGroup[ix,iy]=1
+                    lb_field.mask_InsideGroup[ix,iy]=0
 
                     if ix==0:
-                        lb_filed.mask_InletGroup[ix,iy]=1
-                    elif ix==lb_filed.NX-1:
-                        lb_filed.mask_OutletGroup[ix,iy]=1
+                        lb_field.mask_InletGroup[ix,iy]=1
+                    elif ix==lb_field.NX-1:
+                        lb_field.mask_OutletGroup[ix,iy]=1
 
         #boundary  Bounce-Back identify
-        for ix,iy in lb_filed.mask_WallGroup:
-            if lb_filed.mask_WallGroup[ix,iy]==1:
-                for k in ti.static(range(lb_filed.NPOP)):
-                    ix2=lb_filed.Neighbordata[ix,iy][k,0]
+        for ix,iy in lb_field.mask_WallGroup:
+            if lb_field.mask_WallGroup[ix,iy]==1:
+                for k in ti.static(range(lb_field.NPOP)):
+                    ix2=lb_field.Neighbordata[ix,iy][k,0]
                     if ix2==-1:
                         if k == 1:  
                             ix2 = 3  
@@ -251,82 +252,82 @@ class BoundaryEngine:
                             ix2 = 5  
                         elif k == 8:  
                             ix2 = 6 
-                        lb_filed.NeighbordataBoundary[ix,iy][k]=ix2
+                        lb_field.NeighbordataBoundary[ix,iy][k]=ix2
 
         # delete max and min in group inlet and outlet
-        lb_filed.mask_InletGroup[0,0]=0
-        lb_filed.mask_InletGroup[0,lb_filed.NY-1]=0
+        lb_field.mask_InletGroup[0,0]=0
+        lb_field.mask_InletGroup[0,lb_field.NY-1]=0
 
-        lb_filed.mask_OutletGroup[lb_filed.NX-1,0]=0
-        lb_filed.mask_OutletGroup[lb_filed.NX-1,lb_filed.NY-1]=0
+        lb_field.mask_OutletGroup[lb_field.NX-1,0]=0
+        lb_field.mask_OutletGroup[lb_field.NX-1,lb_field.NY-1]=0
 
-        for i,j in lb_filed.mask:
-            if lb_filed.mask_FluidGroup[i,j]==1:
-                idx = ti.atomic_add(lb_filed.count_FluidGroup[None], 1)
-                lb_filed.boundaryGroup_Fluid[idx]=ti.Vector([i,j])
+        for i,j in lb_field.mask:
+            if lb_field.mask_FluidGroup[i,j]==1:
+                idx = ti.atomic_add(lb_field.count_FluidGroup[None], 1)
+                lb_field.boundaryGroup_Fluid[idx]=ti.Vector([i,j])
 
-            if lb_filed.mask_InsideGroup[i,j]==1:
-                idx=ti.atomic_add(lb_filed.count_InsideGroup[None],1)
-                lb_filed.boundaryGroup_Inside[idx]=ti.Vector([i,j])
+            if lb_field.mask_InsideGroup[i,j]==1:
+                idx=ti.atomic_add(lb_field.count_InsideGroup[None],1)
+                lb_field.boundaryGroup_Inside[idx]=ti.Vector([i,j])
 
-            if lb_filed.mask_WallGroup[i,j]==1:
-                idx=ti.atomic_add(lb_filed.count_WallGroup[None],1)
-                lb_filed.boundaryGroup_Wall[idx]=ti.Vector([i,j])
+            if lb_field.mask_WallGroup[i,j]==1:
+                idx=ti.atomic_add(lb_field.count_WallGroup[None],1)
+                lb_field.boundaryGroup_Wall[idx]=ti.Vector([i,j])
 
-            if lb_filed.mask_InletGroup[i,j]==1:
-                idx=ti.atomic_add(lb_filed.count_InletGroup[None],1)
-                lb_filed.boundaryGroup_Inlet[idx]=ti.Vector([i,j])
+            if lb_field.mask_InletGroup[i,j]==1:
+                idx=ti.atomic_add(lb_field.count_InletGroup[None],1)
+                lb_field.boundaryGroup_Inlet[idx]=ti.Vector([i,j])
 
-            if lb_filed.mask_OutletGroup[i,j]==1:
-                idx=ti.atomic_add(lb_filed.count_OutletGroup[None],1)
-                lb_filed.boundaryGroup_Outlet[idx]=ti.Vector([i,j])
+            if lb_field.mask_OutletGroup[i,j]==1:
+                idx=ti.atomic_add(lb_field.count_OutletGroup[None],1)
+                lb_field.boundaryGroup_Outlet[idx]=ti.Vector([i,j])
 
         print("Boundary identify")
 
     @ti.kernel
-    def png_cau(self,lb_filed:ti.template()):
-        lb_filed.img.fill([252/ 255,255/ 255,245/ 255])
+    def png_cau(self,lb_field:ti.template()):
+        lb_field.img.fill([252/ 255,255/ 255,245/ 255])
 
-        boundaryGroup_Inside=lb_filed.count_InsideGroup[None]
+        boundaryGroup_Inside=lb_field.count_InsideGroup[None]
         for m in range(boundaryGroup_Inside):
-            i,j=lb_filed.boundaryGroup_Inside[m]
-            lb_filed.img[i,j]=ti.Vector([52 / 255,152 / 255,219/ 255])
+            i,j=lb_field.boundaryGroup_Inside[m]
+            lb_field.img[i,j]=ti.Vector([52 / 255,152 / 255,219/ 255])
 
-        boundaryGroup_Wall=lb_filed.count_WallGroup[None]
+        boundaryGroup_Wall=lb_field.count_WallGroup[None]
         for m in range(boundaryGroup_Wall):
-            i,j=lb_filed.boundaryGroup_Wall[m]
-            lb_filed.img[i, j] = ti.Vector([1.0, 0.0, 0.0])
+            i,j=lb_field.boundaryGroup_Wall[m]
+            lb_field.img[i, j] = ti.Vector([1.0, 0.0, 0.0])
 
-        boundaryGroup_Inlet=lb_filed.count_InletGroup[None]
+        boundaryGroup_Inlet=lb_field.count_InletGroup[None]
         for m in range(boundaryGroup_Inlet):
-            i,j=lb_filed.boundaryGroup_Inlet[m]
-            lb_filed.img[i,j]=ti.Vector([143/ 255,24/ 255,172/ 255])
+            i,j=lb_field.boundaryGroup_Inlet[m]
+            lb_field.img[i,j]=ti.Vector([143/ 255,24/ 255,172/ 255])
 
-        boundaryGroup_Outlet=lb_filed.count_OutletGroup[None]
+        boundaryGroup_Outlet=lb_field.count_OutletGroup[None]
         for m in range(boundaryGroup_Outlet):
-            i,j=lb_filed.boundaryGroup_Outlet[m]
-            lb_filed.img[i,j]=ti.Vector([255 / 255,190 / 255,53/ 255])
+            i,j=lb_field.boundaryGroup_Outlet[m]
+            lb_field.img[i,j]=ti.Vector([255 / 255,190 / 255,53/ 255])
 
-    def writing_boundary(self,lb_filed:ti.template()):
-        self.png_cau(lb_filed=lb_filed)
+    def writing_boundary(self,lb_field:ti.template()):
+        self.png_cau(lb_field=lb_field)
 
-        img_np=lb_filed.img.to_numpy()
+        img_np=lb_field.img.to_numpy()
         img_pil=Image.fromarray((img_np*255).astype(np.uint8))
         img_pil.save('boundary.png')
         print("writing_boundary")
 
     @ti.kernel
-    def Mask_rectangle_identify(self,lb_filed:ti.template(),xmin:float,xmax:float,ymin:float,ymax:float):
-        for i,j in lb_filed.mask:
+    def Mask_rectangle_identify(self,lb_field:ti.template(),xmin:float,xmax:float,ymin:float,ymax:float):
+        for i,j in lb_field.mask:
             if i<xmax and i>xmin:
                 if j<ymax and j>ymin:
-                    lb_filed.mask[i,j]=-1
+                    lb_field.mask[i,j]=-1
 
     @ti.kernel
-    def Mask_cricle_identify(self,lb_filed:ti.template(),x:float,y:float,r:float):
-        for ix,iy in lb_filed.mask:
+    def Mask_cricle_identify(self,lb_field:ti.template(),x:float,y:float,r:float):
+        for ix,iy in lb_field.mask:
             if (ix-x)**2+(iy-y)**2<r**2:
-                lb_filed.mask[ix,iy]=-1
+                lb_field.mask[ix,iy]=-1
 
     @ti.func
     def f_eq(self,c,w,vel,rho):
@@ -347,132 +348,139 @@ class BoundaryEngine:
         return  -f+2*w*rho_w*(1.0+4.5*cu*cu-1.5*uw2)
     
     @ti.kernel
-    def BounceBackInside (self,lb_filed:ti.template()):
+    def BounceBackInside (self,lb_field:ti.template()):
         #BB
-        count_WallGroup=lb_filed.count_WallGroup[None]
+        count_WallGroup=lb_field.count_WallGroup[None]
         for m in range(count_WallGroup):
-            i,j=lb_filed.boundaryGroup_Wall[m]
+            i,j=lb_field.boundaryGroup_Wall[m]
             for k in ti.static(range(9)):
-                ix2=lb_filed.Neighbordata[i,j][k,0]
-                iy2=lb_filed.Neighbordata[i,j][k,1]
+                ix2=lb_field.Neighbordata[i,j][k,0]
+                iy2=lb_field.Neighbordata[i,j][k,1]
                 if ix2!=-1:
                     #stream in boundary
-                    lb_filed.f[i,j][k]=lb_filed.f2[ix2,iy2][k]
+                    lb_field.f[i,j][k]=lb_field.f2[ix2,iy2][k]
                 else:
                     #bounce back on the static wall 
-                    ipop=lb_filed.NeighbordataBoundary[i,j][k]
-                    lb_filed.f[i,j][k]=lb_filed.f2[i,j][ipop]
+                    ipop=lb_field.NeighbordataBoundary[i,j][k]
+                    lb_field.f[i,j][k]=lb_field.f2[i,j][ipop]
 
     @ti.kernel
-    def BounceBackInlet(self,lb_filed:ti.template()):
+    def BounceBackInlet(self,lb_field:ti.template()):
         #inlet
-        count_InletGroup=lb_filed.count_InletGroup[None]
-        if lb_filed.InletMode==1:
+        count_InletGroup=lb_field.count_InletGroup[None]
+        if lb_field.InletMode==1:
             #Perform velocity bounce back on the inlet
             for m in range(count_InletGroup):
-                i,j=lb_filed.boundaryGroup_Inlet[m]
+                i,j=lb_field.boundaryGroup_Inlet[m]
 
-                cv=lb_filed.c[1,0]*lb_filed.vel_wall_Inlet[0]+lb_filed.c[1,1]*lb_filed.vel_wall_Inlet[1]
-                ti.atomic_add(lb_filed.f[i,j][1],6*lb_filed.weights[1]*lb_filed.rho[i,j]*cv)
+                cv=lb_field.c[1,0]*lb_field.vel_wall_Inlet[0]+lb_field.c[1,1]*lb_field.vel_wall_Inlet[1]
+                ti.atomic_add(lb_field.f[i,j][1],6*lb_field.weights[1]*lb_field.rho[i,j]*cv)
 
-                cv=lb_filed.c[5,0]*lb_filed.vel_wall_Inlet[0]+lb_filed.c[5,1]*lb_filed.vel_wall_Inlet[1]
-                ti.atomic_add(lb_filed.f[i,j][5],6*lb_filed.weights[5]*lb_filed.rho[i,j]*cv)
+                cv=lb_field.c[5,0]*lb_field.vel_wall_Inlet[0]+lb_field.c[5,1]*lb_field.vel_wall_Inlet[1]
+                ti.atomic_add(lb_field.f[i,j][5],6*lb_field.weights[5]*lb_field.rho[i,j]*cv)
 
-                cv=lb_filed.c[8,0]*lb_filed.vel_wall_Inlet[0]+lb_filed.c[8,1]*lb_filed.vel_wall_Inlet[1]
-                ti.atomic_add(lb_filed.f[i,j][8],6*lb_filed.weights[8]*lb_filed.rho[i,j]*cv)
+                cv=lb_field.c[8,0]*lb_field.vel_wall_Inlet[0]+lb_field.c[8,1]*lb_field.vel_wall_Inlet[1]
+                ti.atomic_add(lb_field.f[i,j][8],6*lb_field.weights[8]*lb_field.rho[i,j]*cv)
         else:
             for m in range(count_InletGroup):
-                i,j=lb_filed.boundaryGroup_Inlet[m]
-                ix2=lb_filed.Neighbordata[i,j][3,0]
-                iy2=lb_filed.Neighbordata[i,j][3,1]
-                # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-                # lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                # lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
+                i,j=lb_field.boundaryGroup_Inlet[m]
+                ix2=lb_field.Neighbordata[i,j][3,0]
+                iy2=lb_field.Neighbordata[i,j][3,1]
+                # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
+                # lb_field.rho[i,j]=lb_field.rho_Inlet
+                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
 
                 #ABC
-                uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-                lb_filed.vel[i,j]=uw
-                lb_filed.rho[i,j]=lb_filed.rho_Inlet
-                ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],lb_filed.rho_Inlet,uw)
-                lb_filed.f[i,j][1]=ftemp[1]
-                lb_filed.f[i,j][5]=ftemp[5]
-                lb_filed.f[i,j][8]=ftemp[8]
+                uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
+                lb_field.vel[i,j]=uw
+                lb_field.rho[i,j]=lb_field.rho_Inlet
+                ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[i,j],lb_field.rho_Inlet,uw)
+                lb_field.f[i,j][1]=ftemp[1]
+                lb_field.f[i,j][5]=ftemp[5]
+                lb_field.f[i,j][8]=ftemp[8]
 
     @ti.kernel
-    def BounceBackOutlet(self,lb_filed:ti.template()):
+    def BounceBackOutlet(self,lb_field:ti.template()):
         #Perform Pressure bounce back on the Outlet
-        count_OutletGroup=lb_filed.count_OutletGroup[None]
+        count_OutletGroup=lb_field.count_OutletGroup[None]
         for m in range(count_OutletGroup):
 
-            i,j = lb_filed.boundaryGroup_Outlet[m]
-            ix2=lb_filed.Neighbordata[i,j][1,0]
-            iy2=lb_filed.Neighbordata[i,j][1,1]
+            i,j = lb_field.boundaryGroup_Outlet[m]
+            ix2=lb_field.Neighbordata[i,j][1,0]
+            iy2=lb_field.Neighbordata[i,j][1,1]
 
             #NEEM
-            # lb_filed.rho[i,j]=1.0
-            # lb_filed.vel[i,j]=lb_filed.vel[ix2,iy2]
-            # lb_filed.f[i,j]=self.NEEM(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j],lb_filed.vel[ix2,iy2],lb_filed.rho[ix2,iy2],lb_filed.f[ix2,iy2])
+            # lb_field.rho[i,j]=1.0
+            # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
+            # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
 
             #ABC
-            uw=1.5*lb_filed.vel[i,j]-0.5*lb_filed.vel[ix2,iy2]
-            lb_filed.vel[i,j]=uw
-            lb_filed.rho[i,j]=1.0
-            ftemp=self.ABC(lb_filed.c,lb_filed.weights,lb_filed.f[i,j],1.0,uw)
-            lb_filed.f[i,j][3]=ftemp[3]
-            lb_filed.f[i,j][6]=ftemp[6]
-            lb_filed.f[i,j][7]=ftemp[7]
+            uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
+            lb_field.vel[i,j]=uw
+            lb_field.rho[i,j]=1.0
+            ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[i,j],1.0,uw)
+            lb_field.f[i,j][3]=ftemp[3]
+            lb_field.f[i,j][6]=ftemp[6]
+            lb_field.f[i,j][7]=ftemp[7]
 
 
+    @ti.kernel
+    def BB(self,lb_field:ti.template()):
+        temp=1/6.0*lb_field.vel_wall_Inlet.x
+        for x in range(lb_field.NX):
+            lb_field.f[x,lb_field.NY-1][4]=lb_field.f[x,lb_field.NY-1][2]
+            lb_field.f[x,lb_field.NY-1][7]=lb_field.f[x,lb_field.NY-1][5]-temp
+            lb_field.f[x,lb_field.NY-1][8]=lb_field.f[x,lb_field.NY-1][6]+temp
 
-
-
-
+            lb_field.f[x,0][2]=lb_field.f[x,0][4]
+            lb_field.f[x,0][5]=lb_field.f[x,0][7]
+            lb_field.f[x,0][6]=lb_field.f[x,0][8]
 
 @ti.data_oriented
 class MacroscopicEngine:
     @ti.kernel
-    def computeDensity(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def computeDensity(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i,j=lb_filed.boundaryGroup_Fluid[m]
-            lb_filed.rho[i,j]=0.0
+            i,j=lb_field.boundaryGroup_Fluid[m]
+            lb_field.rho[i,j]=0.0
             # compute the density and uncorrected velocity
-            for k in ti.static(range(lb_filed.NPOP)):
-                lb_filed.rho[i,j]+=lb_filed.f[i,j][k]
+            for k in ti.static(range(lb_field.NPOP)):
+                lb_field.rho[i,j]+=lb_field.f[i,j][k]
             
     @ti.kernel
-    def computePressure(self,lb_filed:ti.template(),sc_filed:ti.template()):
-        lb_filed.pressure.fill(0.0)
-        count_FluidGroup = lb_filed.count_FluidGroup[None]
+    def computePressure(self,lb_field:ti.template(),sc_filed:ti.template()):
+        lb_field.pressure.fill(0.0)
+        count_FluidGroup = lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i, j = lb_filed.boundaryGroup_Fluid[m]
-            lb_filed.pressure[i,j]=lb_filed.rho[i,j]/3.0+sc_filed.gA/6.0*lb_filed.psi(lb_filed.rho[i,j])**2
+            i, j = lb_field.boundaryGroup_Fluid[m]
+            lb_field.pressure[i,j]=lb_field.rho[i,j]/3.0+sc_filed.gA/6.0*lb_field.psi(lb_field.rho[i,j])**2
 
     @ti.kernel
-    def computerForceDensity(self,lb_filed:ti.template()):
+    def computerForceDensity(self,lb_field:ti.template()):
         #Reset forces
-        lb_filed.bodyForce.fill([0.0,0.0])
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+        lb_field.bodyForce.fill([0.0,0.0])
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i,j=lb_filed.boundaryGroup_Fluid[m]
-            ti.atomic_add(lb_filed.bodyForce[i,j],lb_filed.gravityForce+lb_filed.SCforce[i,j])
+            i,j=lb_field.boundaryGroup_Fluid[m]
+            ti.atomic_add(lb_field.bodyForce[i,j],lb_field.gravityForce+lb_field.SCforce[i,j])
 
     @ti.kernel
-    def computeVelocity(self,lb_filed:ti.template()):
-        count_FluidGroup = lb_filed.count_FluidGroup[None]
+    def computeVelocity(self,lb_field:ti.template()):
+        count_FluidGroup = lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i, j = lb_filed.boundaryGroup_Fluid[m]
-            lb_filed.vel[i, j] = ti.Vector([0.0, 0.0])
+            i, j = lb_field.boundaryGroup_Fluid[m]
+            lb_field.vel[i, j] = ti.Vector([0.0, 0.0])
             
             vel_temp = ti.Vector([0.0, 0.0])
-            for k in ti.static(range(lb_filed.NPOP)):
-                vel_temp.x += lb_filed.f[i, j][k] * lb_filed.c[k, 0]
-                vel_temp.y += lb_filed.f[i, j][k] * lb_filed.c[k, 1]
+            for k in ti.static(range(lb_field.NPOP)):
+                vel_temp.x += lb_field.f[i, j][k] * lb_field.c[k, 0]
+                vel_temp.y += lb_field.f[i, j][k] * lb_field.c[k, 1]
             
-            vel_temp+=0.5 * lb_filed.bodyForce[i, j]
+            vel_temp+=0.5 * lb_field.bodyForce[i, j]
 
-            lb_filed.vel[i, j]+=vel_temp
-            lb_filed.vel[i, j] /= lb_filed.rho[i, j]
+            lb_field.vel[i, j]+=vel_temp
+            lb_field.vel[i, j] /= lb_field.rho[i, j]
 
 @ti.data_oriented
 class CollisionEngine:
@@ -500,19 +508,19 @@ class BGKCollision(CollisionEngine):
         self.omega=omega
 
     @ti.kernel#LBM solve
-    def Collision(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def Collision(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
 
         for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
+            i,j = lb_field.boundaryGroup_Fluid[m]
 
-            feqeq=self.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
-            force_ij=self.f_force(lb_filed.c,lb_filed.weights,lb_filed.bodyForce[i,j],lb_filed.vel[i,j])
+            feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j])
+            force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.bodyForce[i,j],lb_field.vel[i,j])
 
-            CollisionOperator =-self.omega*(lb_filed.f[i,j]-feqeq)
+            CollisionOperator =-self.omega*(lb_field.f[i,j]-feqeq)
             ForceTerm=(1.0-0.5*self.omega)*force_ij
 
-            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
+            lb_field.f2[i,j]=lb_field.f[i,j]+CollisionOperator+ForceTerm
 
 @ti.data_oriented
 class TRTCollision(CollisionEngine):
@@ -568,26 +576,26 @@ class TRTCollision(CollisionEngine):
         return force_sym
     
     @ti.kernel#LBM solve
-    def Collision(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def Collision(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
+            i,j = lb_field.boundaryGroup_Fluid[m]
 
-            feqeq=self.f_eq(lb_filed.c,lb_filed.weights,lb_filed.vel[i,j],lb_filed.rho[i,j])
-            force_ij=self.f_force(lb_filed.c,lb_filed.weights,lb_filed.bodyForce[i,j],lb_filed.vel[i,j])
+            feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j])
+            force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.bodyForce[i,j],lb_field.vel[i,j])
 
             #symmetrical and antisymmetrical particle distribution functions
-            f_sym=self.f_sym(lb_filed.f[i,j])
+            f_sym=self.f_sym(lb_field.f[i,j])
             feq_sym=self.feq_sym(feqeq)
             force_sym=self.force_sym(force_ij)
 
-            f_antisym=lb_filed.f[i,j]-f_sym
+            f_antisym=lb_field.f[i,j]-f_sym
             feq_antisym=feqeq-feq_sym
             force_antisym=force_ij-force_sym
 
             CollisionOperator =-self.omega_sym * (f_sym-feq_sym)-self.omega_antisym*(f_antisym-feq_antisym)
             ForceTerm=(1.0-0.5*self.omega_sym)*force_sym+(1.0-0.5*self.omega_antisym)*force_antisym
-            lb_filed.f2[i,j]=lb_filed.f[i,j]+CollisionOperator+ForceTerm
+            lb_field.f2[i,j]=lb_field.f[i,j]+CollisionOperator+ForceTerm
 
 @ti.data_oriented
 class MRTCollision(CollisionEngine):
@@ -600,7 +608,7 @@ class MRTCollision(CollisionEngine):
                 [-4.0, -1.0, -1.0, -1.0, -1.0, 2.0, 2.0, 2.0, 2.0],
                 [4.0, -2.0, -2.0, -2.0, -2.0, 1.0, 1.0, 1.0, 1.0],
                 [0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0],
-                [0.0, -2.0, 0.0, 2.0, 0.0, -1.0, -1.0,-1.0, 1.0],
+                [0.0, -2.0, 0.0, 2.0, 0.0, 1.0, -1.0,-1.0, 1.0],
                 [0.0, 0.0, 1.0, 0.0, -1.0, 1.0, 1.0, -1.0, -1.0],
                 [0.0, 0.0, -2.0, 0.0, 2.0, 1.0, 1.0, -1.0, -1.0],
                 [0.0, 1.0, -1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
@@ -680,10 +688,10 @@ class MRTCollision(CollisionEngine):
         return mforce
     
     @ti.kernel#LBM solve
-    def Collision(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def Collision(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for id in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[id]
+            i,j = lb_field.boundaryGroup_Fluid[id]
 
             m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
             a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
@@ -693,10 +701,10 @@ class MRTCollision(CollisionEngine):
             #Transform to moment space
             for ii in ti.static(range(9)):
                 for jj in ti.static(range(9)):
-                    m[ii]+=self.M[ii,jj]*lb_filed.f[i,j][jj]
+                    m[ii]+=self.M[ii,jj]*lb_field.f[i,j][jj]
 
-            meq=self.m_eq(lb_filed.vel[i,j],lb_filed.rho[i,j]) #Compute equilibrium moments
-            mf=self.m_force(lb_filed.bodyForce[i,j],lb_filed.vel[i,j]) #Guo Forcing
+            meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j]) #Compute equilibrium moments
+            mf=self.m_force(lb_field.bodyForce[i,j],lb_field.vel[i,j]) #Guo Forcing
 
             for ii in ti.static(range(9)):
                 a[ii]=self.diag[ii]*(m[ii]-meq[ii])
@@ -709,7 +717,7 @@ class MRTCollision(CollisionEngine):
                 for jj in ti.static(range(9)):
                     ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
 
-            lb_filed.f2[i,j]=fpop2
+            lb_field.f2[i,j]=fpop2
 
 @ti.data_oriented
 class HuangMRTCollision(MRTCollision):
@@ -750,10 +758,10 @@ class HuangMRTCollision(MRTCollision):
         return Qm
     
     @ti.kernel
-    def Collision(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def Collision(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for id in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[id]
+            i,j = lb_field.boundaryGroup_Fluid[id]
 
             m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
             a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
@@ -764,11 +772,11 @@ class HuangMRTCollision(MRTCollision):
             #Transform to moment space
             for ii in ti.static(range(9)):
                 for jj in ti.static(range(9)):
-                    ti.atomic_add(m[ii],self.M[ii,jj]*lb_filed.f[i,j][jj])
+                    ti.atomic_add(m[ii],self.M[ii,jj]*lb_field.f[i,j][jj])
 
-            meq=self.m_eq(lb_filed.vel[i,j],lb_filed.rho[i,j]) #Compute equilibrium moments
-            mf=self.m_force(lb_filed.bodyForce[i,j],lb_filed.vel[i,j]) #Guo Forcing
-            mQ=self.m_Q(lb_filed.bodyForce[i,j],lb_filed.rho[i,j]) # huang
+            meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j]) #Compute equilibrium moments
+            mf=self.m_force(lb_field.bodyForce[i,j],lb_field.vel[i,j]) #Guo Forcing
+            mQ=self.m_Q(lb_field.bodyForce[i,j],lb_field.rho[i,j]) # huang
 
             for ii in ti.static(range(9)):
                 a[ii]=self.diag[ii]*(m[ii]-meq[ii])
@@ -782,66 +790,66 @@ class HuangMRTCollision(MRTCollision):
                 for jj in ti.static(range(9)):
                     ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
 
-            lb_filed.f2[i,j]=fpop2
+            lb_field.f2[i,j]=fpop2
 
     @ti.kernel
-    def computeSCForces(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def computeSCForces(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
+            i,j = lb_field.boundaryGroup_Fluid[m]
 
-            lb_filed.SCforce[i,j].x=0.0
-            lb_filed.SCforce[i,j].y=0.0
+            lb_field.SCforce[i,j].x=0.0
+            lb_field.SCforce[i,j].y=0.0
 
             f_temp_x=0.0
             f_temp_y=0.0
             psinb=0.0
             for k in ti.static(range(1,9)):
-                # x2=i+lb_filed.c[k,0]
-                # y2=j+lb_filed.c[k,1]
-                x2=(i+lb_filed.c[k,0]+lb_filed.NX)%lb_filed.NX 
-                y2=(j+lb_filed.c[k,1]+lb_filed.NY)%lb_filed.NY
+                # x2=i+lb_field.c[k,0]
+                # y2=j+lb_field.c[k,1]
+                x2=(i+lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
+                y2=(j+lb_field.c[k,1]+lb_field.NY)%lb_field.NY
 
-                if lb_filed.mask[x2,y2]==-1: #solid
-                    # if lb_filed.rho[i,j]>lb_filed.rho_liq/8.0:
-                    #     psinb=lb_filed.psi(lb_filed.rho_solid)
+                if lb_field.mask[x2,y2]==-1: #solid
+                    # if lb_field.rho[i,j]>lb_field.rho_liq/8.0:
+                    #     psinb=lb_field.psi(lb_field.rho_solid)
                     # else:
-                    psinb=lb_filed.psi(lb_filed.rho_solid)
+                    psinb=lb_field.psi(lb_field.rho_solid)
                 else:
-                    psinb=lb_filed.psi(lb_filed.rho[x2,y2])
+                    psinb=lb_field.psi(lb_field.rho[x2,y2])
 
-                f_temp_x+=lb_filed.weights[k]*lb_filed.c[k,0]*psinb
-                f_temp_y+=lb_filed.weights[k]*lb_filed.c[k,1]*psinb
+                f_temp_x+=lb_field.weights[k]*lb_field.c[k,0]*psinb
+                f_temp_y+=lb_field.weights[k]*lb_field.c[k,1]*psinb
 
-            psiloc=lb_filed.psi(lb_filed.rho[i,j])
-            f_temp_x*=(-lb_filed.gA*psiloc)
-            f_temp_y*=(-lb_filed.gA*psiloc)
+            psiloc=lb_field.psi(lb_field.rho[i,j])
+            f_temp_x*=(-lb_field.gA*psiloc)
+            f_temp_y*=(-lb_field.gA*psiloc)
 
-            ti.atomic_add(lb_filed.SCforce[i,j].x,f_temp_x)
-            ti.atomic_add(lb_filed.SCforce[i,j].y,f_temp_y)
+            ti.atomic_add(lb_field.SCforce[i,j].x,f_temp_x)
+            ti.atomic_add(lb_field.SCforce[i,j].y,f_temp_y)
 
 @ti.data_oriented
 class StreamEngine:
     @ti.kernel
-    def StreamInside(self,lb_filed:ti.template()):
+    def StreamInside(self,lb_field:ti.template()):
         #stream in InsideGroup
-        count_InsideGroup=lb_filed.count_InsideGroup[None]
+        count_InsideGroup=lb_field.count_InsideGroup[None]
         for m in range(count_InsideGroup):
-            i,j =lb_filed.boundaryGroup_Inside[m]
-            for k in ti.static(range(lb_filed.NPOP)):
-                ix2=lb_filed.Neighbordata[i,j][k,0]
-                iy2=lb_filed.Neighbordata[i,j][k,1]
-                lb_filed.f[i,j][k]=lb_filed.f2[ix2,iy2][k]
+            i,j =lb_field.boundaryGroup_Inside[m]
+            for k in ti.static(range(lb_field.NPOP)):
+                ix2=lb_field.Neighbordata[i,j][k,0]
+                iy2=lb_field.Neighbordata[i,j][k,1]
+                lb_field.f[i,j][k]=lb_field.f2[ix2,iy2][k]
 
 
     @ti.kernel
-    def StreamPeriodic(self,lb_filed:ti.template()):
-        count_FluidGroup=lb_filed.count_FluidGroup[None]
+    def StreamPeriodic(self,lb_field:ti.template()):
+        count_FluidGroup=lb_field.count_FluidGroup[None]
         for m in range(count_FluidGroup):
-            i,j = lb_filed.boundaryGroup_Fluid[m]
-            for k in ti.static(range(lb_filed.NPOP)):
-                x2=(i-lb_filed.c[k,0]+lb_filed.NX)%lb_filed.NX 
-                y2=(j-lb_filed.c[k,1]+lb_filed.NY)%lb_filed.NY
-                lb_filed.f[i,j][k]=lb_filed.f2[x2,y2][k]
+            i,j = lb_field.boundaryGroup_Fluid[m]
+            for k in ti.static(range(lb_field.NPOP)):
+                x2=(i-lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
+                y2=(j-lb_field.c[k,1]+lb_field.NY)%lb_field.NY
+                lb_field.f[i,j][k]=lb_field.f2[x2,y2][k]
 
 
