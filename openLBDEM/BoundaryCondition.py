@@ -26,10 +26,24 @@ class BoundaryCondition:
         cu=c@uw
         uw2=tm.dot(uw,uw)
         return  -f+2*w*rho_w*(1.0+4.5*cu*cu-1.5*uw2)
+
+@ti.data_oriented
+class WettingBoundary(BoundaryCondition):
+    def __init__(self,boundary_group:ti.template(),rho_solid_cof:float,rho_solid:float):
+        super().__init__()
+        self.boundary_group=boundary_group
+        self.rho_solid=rho_solid
     
+    @ti.kernel
+    def apply(self,lb_field:ti.template()):
+        for m in range(self.boundary_group.count[None]):
+            i,j=self.boundary_group.group[m]
+            lb_field.rho_solid[i,j]=self.rho_solid
+    
+
 @ti.data_oriented
 class VelocityInlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),velocity):
+    def __init__(self,boundary_group:ti.template(),velocity): # type: ignore
         super().__init__()
         self.boundary_group=boundary_group
         self.velocity_in=velocity
@@ -40,18 +54,19 @@ class VelocityInlet(BoundaryCondition):
         #Perform velocity bounce back on the inlet
         for m in range(self.boundary_group.count[None]):
             i,j=self.boundary_group.group[m]
-            cv=lb_field.c[1,0]*self.velocity_in.x+lb_field.c[1,1]*self.velocity_in.y
-            ti.atomic_add(lb_field.f[i,j][1],6*lb_field.weights[1]*lb_field.rho[i,j]*cv)
+            for component in range(lb_field.num_components[None]):
+                cv=lb_field.c[1,0]*self.velocity_in.x+lb_field.c[1,1]*self.velocity_in.y
+                lb_field.f[component,i,j][1]+=6*lb_field.weights[1]*lb_field.rho[component,i,j]*cv
 
-            cv=lb_field.c[5,0]*self.velocity_in.x+lb_field.c[5,1]*self.velocity_in.y
-            ti.atomic_add(lb_field.f[i,j][5],6*lb_field.weights[5]*lb_field.rho[i,j]*cv)
+                cv=lb_field.c[5,0]*self.velocity_in.x+lb_field.c[5,1]*self.velocity_in.y
+                lb_field.f[component,i,j][5]+=6*lb_field.weights[5]*lb_field.rho[component,i,j]*cv
 
-            cv=lb_field.c[8,0]*self.velocity_in.x+lb_field.c[8,1]*self.velocity_in.y
-            ti.atomic_add(lb_field.f[i,j][8],6*lb_field.weights[8]*lb_field.rho[i,j]*cv)
+                cv=lb_field.c[8,0]*self.velocity_in.x+lb_field.c[8,1]*self.velocity_in.y
+                lb_field.f[component,i,j][8]+=6*lb_field.weights[8]*lb_field.rho[component,i,j]*cv
 
 @ti.data_oriented
 class PressureInlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),rho_in):
+    def __init__(self,boundary_group:ti.template(),rho_in): # type: ignore
         super().__init__()
         self.boundary_group=boundary_group
         self.rho_in=rho_in
@@ -62,22 +77,23 @@ class PressureInlet(BoundaryCondition):
             i,j=self.boundary_group.group[m]
             ix2=lb_field.neighbor[i,j][3,0]
             iy2=lb_field.neighbor[i,j][3,1]
-            # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
-            # lb_field.rho[i,j]=self.rho_in
-            # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
+            for component in range(lb_field.num_components[None]):
+                # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
+                # lb_field.rho[i,j]=self.rho_in
+                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
 
-            #ABC
-            uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
-            lb_field.vel[i,j]=uw
-            lb_field.rho[i,j]=self.rho_in
-            ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[i,j],self.rho_in,uw)
-            lb_field.f[i,j][1]=ftemp[1]
-            lb_field.f[i,j][5]=ftemp[5]
-            lb_field.f[i,j][8]=ftemp[8]
+                #ABC
+                uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
+                lb_field.vel[i,j]=uw
+                lb_field.total_rho[i,j]=self.rho_in
+                ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[component,i,j],self.rho_in,uw)
+                lb_field.f[component,i,j][1]=ftemp[1]
+                lb_field.f[component,i,j][5]=ftemp[5]
+                lb_field.f[component,i,j][8]=ftemp[8]
 
 @ti.data_oriented
 class PressureOutlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),rho_out):
+    def __init__(self,boundary_group:ti.template(),rho_out): # type: ignore
         super().__init__()
         self.boundary_group=boundary_group
         self.rho_out=rho_out
@@ -89,19 +105,20 @@ class PressureOutlet(BoundaryCondition):
             ix2=lb_field.neighbor[i,j][1,0]
             iy2=lb_field.neighbor[i,j][1,1]
 
-            #NEEM
-            # lb_field.rho[i,j]=self.rho_out
-            # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
-            # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
+            for component in range(lb_field.num_components[None]):
+                #NEEM
+                # lb_field.rho[i,j]=self.rho_out
+                # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
+                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
 
-            #ABC
-            uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
-            lb_field.vel[i,j]=uw
-            lb_field.rho[i,j]=self.rho_out
-            ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[i,j],self.rho_out,uw)
-            lb_field.f[i,j][3]=ftemp[3]
-            lb_field.f[i,j][6]=ftemp[6]
-            lb_field.f[i,j][7]=ftemp[7]
+                #ABC
+                uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
+                lb_field.vel[i,j]=uw
+                lb_field.total_rho[i,j]=self.rho_out
+                ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[component,i,j],self.rho_out,uw)
+                lb_field.f[component,i,j][3]=ftemp[3]
+                lb_field.f[component,i,j][6]=ftemp[6]
+                lb_field.f[component,i,j][7]=ftemp[7]
 
 @ti.data_oriented
 class BounceBackWall(BoundaryCondition):
@@ -110,19 +127,21 @@ class BounceBackWall(BoundaryCondition):
         self.boundary_group=boundary_group
 
     @ti.kernel
-    def apply(self, lb_field:ti.template()):
+    def apply(self, lb_field:ti.template()): # type: ignore
         for m in range(self.boundary_group.count[None]):
             i,j=self.boundary_group.group[m]
-            for k in ti.static(range(9)):
-                ix2=lb_field.neighbor[i,j][k,0]
-                iy2=lb_field.neighbor[i,j][k,1]
-                if ix2!=-1:
-                    #stream in boundary
-                    lb_field.f[i,j][k]=lb_field.f2[ix2,iy2][k]
-                else:
-                    #bounce back on the static wall 
-                    ipop=lb_field.neighbor_boundary[i,j][k]
-                    lb_field.f[i,j][k]=lb_field.f2[i,j][ipop]
+            for component in range(lb_field.num_components[None]):
+                
+                for k in ti.static(range(9)):
+                    ix2=lb_field.neighbor[i,j][k,0]
+                    iy2=lb_field.neighbor[i,j][k,1]
+                    if ix2!=-1:
+                        #stream in boundary
+                        lb_field.f[component,i,j][k]=lb_field.f2[component,ix2,iy2][k]
+                    else:
+                        #bounce back on the static wall 
+                        ipop=lb_field.neighbor_boundary[i,j][k]
+                        lb_field.f[component,i,j][k]=lb_field.f2[component,i,j][ipop]
 
 @ti.data_oriented
 class PeriodicBoundary(BoundaryCondition):

@@ -1,8 +1,9 @@
 # openLBM/__init__.py
 
 
-from .openLBM import LBField,PostProcessingEngine,MacroscopicEngine,StreamEngine
+from .openLBM import LBField,MacroscopicEngine
 from .BoundaryCondition import BoundaryCondition, VelocityInlet, PressureInlet, PressureOutlet, BounceBackWall,BoundaryEngine
-from .CollisionEngine import BGKCollision, TRTCollision, MRTCollision, HuangMRTCollision
+from .CollisionEngine import BGKCollision, TRTCollision, MRTCollision
 
 from .openIBM import SphereIB,IBDEMCouplerEngine,IBEngine
+from .ExternalForce import ShanChenForce
