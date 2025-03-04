@@ -7,8 +7,10 @@ class ShanChenForce:
         self.g = ti.field(float,shape=(lb_field.num_components[None],lb_field.num_components[None])) #interaction strength
         self.rho0 = 1.0
         self.rho_cr=tm.log(2.0)
-        self.rho_liq=1.93244248895799
-        self.rho_gas=0.156413030238316
+        self.rho0_liq=1.93244248895799
+        self.rho0_gas=0.156413030238316
+        self.rho1_liq=1.76775878467311
+        self.rho1_gas=0.187191599699299
         self.solidCof=0.5
 
     def setting_pars(self,lb_field:ti.template(),g):
@@ -49,7 +51,7 @@ class ShanChenForce:
     @ti.kernel
     def init_hydro(self,lb_field:ti.template()):
         lb_field.vel.fill([.0,.0])
-        lb_field.total_rho.fill(1.0)
+
         for m in range(lb_field.fluid_boundary.count[None]):
                 ix,iy=lb_field.fluid_boundary.group[m]
                 # if iy<lb_field.NY/2:
@@ -59,12 +61,12 @@ class ShanChenForce:
                 #     lb_field.rho[0,ix,iy]=self.rho_liq 
                 #     lb_field.rho[1,ix,iy]=self.rho_gas
 
-                # if (ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2<=30*2:
-                #     lb_field.rho[0,ix,iy]=self.rho_gas
-                #     lb_field.rho[1,ix,iy]=self.rho_liq 
+                # if (ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2<=100*2:
+                #     lb_field.rho[0,ix,iy]=self.rho0_gas
+                #     lb_field.rho[1,ix,iy]=self.rho0_liq
                 # else:
-                #     lb_field.rho[0,ix,iy]=self.rho_liq
-                #     lb_field.rho[1,ix,iy]=self.rho_gas
+                #     lb_field.rho[0,ix,iy]=self.rho1_gas
+                #     lb_field.rho[1,ix,iy]=self.rho1_liq
 
                 lb_field.rho[0,ix,iy]=self.rho_cr+0.1*ti.random()
-                lb_field.rho[1,ix,iy]=self.rho_cr
+                lb_field.rho[1,ix,iy]=self.rho1_gas

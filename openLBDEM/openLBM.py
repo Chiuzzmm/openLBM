@@ -32,10 +32,12 @@ class LBField:
 
         # 宏观量
         self.rho = ti.field(float, shape=(num_components,NX, NY)) #density of components
-        self.vel = ti.Vector.field(2, float, shape=(NX, NY)) # fluid velocity 
+        self.pressure=ti.field(float, shape=(num_components,NX, NY))  #pressure
         self.body_force=ti.Vector.field(2,float,shape=(num_components,NX,NY)) #force populations
+
+        self.vel = ti.Vector.field(2, float, shape=(NX, NY)) # fluid velocity
         self.total_rho=ti.field(float, shape=(NX, NY)) # density
-        self.pressure=ti.field(float, shape=(NX, NY))  #pressure
+        self.total_pressure=ti.field(float, shape=(NX, NY))
 
         self.rho_solid=ti.field(float, shape=(NX, NY)) #use for shan-chen
 
@@ -181,17 +183,32 @@ class MacroscopicEngine:
                 lb_field.total_rho[i,j]+=lb_field.rho[component,i,j]
 
     @ti.kernel
-    def pressure(self,lb_field:ti.template(),sc_filed:ti.template()):
-        lb_field.pressure.fill(0.0)
+    def pressure(self,lb_field:ti.template(),sc_field:ti.template()):
+        lb_field.pressure.fill(.0)
         for m in range(lb_field.fluid_boundary.count[None]):
             i,j=lb_field.fluid_boundary.group[m]
-            gas=0.0
-            phase=0.0
+
             for component1 in  range(lb_field.num_components[None]):
-                gas+=lb_field.rho[component1,i,j]
-                for component2 in  range(lb_field.num_components[None]):
-                    phase+=sc_filed.g[component1,component2]*sc_filed.psi(lb_field.rho[component1,i,j]*sc_filed.psi(lb_field.rho[component2,i,j]))
-            lb_field.pressure[i,j]=(gas+phase*0.5)/3.0
+                lb_field.pressure[component1, i, j] += (lb_field.rho[component1, i, j] + 0.5 * sc_field.g[component1, component1] * sc_field.psi(lb_field.rho[component1, i, j]) ** 2) / 3.0
+
+            p_ij=0.0
+            p_ii=0.0
+            for component1 in  range(lb_field.num_components[None]):
+                p_ii+=(lb_field.pressure[component1,i,j])
+                for component2 in range(component1 + 1, lb_field.num_components[None]):
+                    if component1!=component2:
+                        p_ij += sc_field.g[component1, component2] * sc_field.psi(lb_field.rho[component1, i, j]) * sc_field.psi(lb_field.rho[component2, i, j])
+                
+            lb_field.total_pressure[i, j] = p_ii + p_ij / 3.0 
+
+            # p_ij=0.0
+            # p_ii=0.0
+            # for component1 in  range(lb_field.num_components[None]):
+            #     p_ii+=lb_field.rho[component1,i,j]
+            #     for component2 in  range(lb_field.num_components[None]):
+            #         p_ij+=sc_field.g[component1,component2]*sc_field.psi(lb_field.rho[component1,i,j])*sc_field.psi(lb_field.rho[component2,i,j])/2.0
+
+            # lb_field.total_pressure[i,j]=p_ii+p_ij/3.0
 
 
     @ti.kernel
@@ -219,20 +236,41 @@ class MacroscopicEngine:
             lb_field.vel[i, j] /= lb_field.total_rho[i, j]
 
 
+    def nomalized_field(self,data):
+        min_val=np.min(data)
+        max_val=np.max(data)
+        normalized_data=(data-min_val)/(max_val-min_val)
+        return normalized_data
+    
+
     def post_pressure(self,lb_field:ti.template()):
-        pressure=lb_field.pressure.to_numpy()
-        return pressure
+        return self.nomalized_field(lb_field.total_pressure.to_numpy())
+
+
+
+    def post_MC_pressure(self,lb_field:ti.template()):
+        images = []
+        for component in range(lb_field.num_components[None]):
+            data = self.nomalized_field(lb_field.pressure.to_numpy()[component,:,:])
+            images.append(data)
+        
+        return np.concatenate(images, axis=1)
+
 
     def post_vel(self,lb_field:ti.template()):
         vel = lb_field.vel.to_numpy()
         vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
-        return vel_mag
+        return self.nomalized_field(vel_mag)
     
+
+
     def writeVTK(self,fname,lb_field:ti.template()):
         rho=lb_field.total_rho.to_numpy().T.flatten()  
         vel=lb_field.vel.to_numpy()
         velx=vel[:,:,0].T.flatten()  
         vely=vel[:,:,1].T.flatten()  
+
+        pressure=lb_field.total_pressure.to_numpy().T.flatten()  
 
         # bodyforce=lb_field.body_force.to_numpy()
         # bodyforcex=bodyforce[:,:,0].T.flatten()
@@ -259,10 +297,15 @@ class MacroscopicEngine:
           
             fout.write("\n")  
             fout.write(f"POINT_DATA {lb_field.NX*lb_field.NY}\n")  
-          
+
+
+            fout.write("SCALARS density double\n")  
+            fout.write("LOOKUP_TABLE density_table\n")  
+            np.savetxt(fout, rho * lb_field.C_rho, fmt='%.8f') 
+        
             fout.write("SCALARS Pressure double\n")  
             fout.write("LOOKUP_TABLE Pressure_table\n")  
-            np.savetxt(fout, (rho - 1) * lb_field.C_pressure/3.0, fmt='%.8f') 
+            np.savetxt(fout, pressure * lb_field.C_pressure/3.0, fmt='%.8f') 
 
 
             fout.write("VECTORS velocity double\n")  
@@ -272,5 +315,6 @@ class MacroscopicEngine:
             # fout.write("VECTORS f double\n")  
             # bodyforce = np.column_stack((bodyforcex, bodyforcey, np.zeros_like(bodyforcex)))  
             # np.savetxt(fout, bodyforce, fmt='%.8f') 
+
 
         print(filename)
