@@ -57,7 +57,7 @@ class BGKCollision(CollisionAndStream):
     def unit_conversion(self,lb_field:ti.template()):
         for component in range(self.num_components[None]):
             self.tau_sym_LB[component]=lb_field.shear_viscosity_LB[component]*3+0.5
-            self.omega[component]=1/self.tau_sym_LB[component]
+            self.omega[component]=1.0/self.tau_sym_LB[component]
 
     @ti.kernel#LBM solve
     def apply(self,lb_field:ti.template()):
@@ -76,26 +76,28 @@ class BGKCollision(CollisionAndStream):
 
 @ti.data_oriented
 class TRTCollision(CollisionAndStream):
-    def __init__(self,num_components):
+    def __init__(self,num_components,magic):
         super().__init__(num_components)
         self.magic=ti.field(float, shape=(num_components,)) 
         self.tau_sym=ti.field(float, shape=(num_components,)) 
         self.tau_antisym=ti.field(float, shape=(num_components,)) 
         self.omega_sym=ti.field(float, shape=(num_components,)) 
         self.omega_antisym=ti.field(float, shape=(num_components,)) 
-    
+
+        for component in range(self.num_components[None]):
+            self.magic[component]=magic[component]
+
     def relaxation_pars(self,omega_sym,omega_antisym):
         for component in range(self.num_components[None]):
             self.omega_sym[component]=omega_sym[component]
             self.omega_antisym[component]=omega_antisym[component]
 
 
-    def unit_conversion(self,lb_field:ti.template(),magic):
+
+    def unit_conversion(self,lb_field:ti.template()):
         for component in range(self.num_components[None]):
-            self.magic[component]=magic[component]
             self.tau_sym[component]=lb_field.shear_viscosity_LB[component]*3+0.5
             self.tau_antisym[component]=self.magic[component]/(self.tau_sym[component]-0.5)+0.5
-
             self.omega_sym[component]=1.0/self.tau_sym[component]
             self.omega_antisym[component]=1.0/self.tau_antisym[component]
 
@@ -293,74 +295,62 @@ class MRTCollision(CollisionAndStream):
 
                 lb_field.f2[component,i,j]=fpop2
 
-# @ti.data_oriented
-# class HuangMRTCollision(MRTCollision):
-#     def __init__(self,num_components):
-#         super().__init__(num_components)
-#         self.k1=1.0
-#         self.k2=1.0
-#         self.gA=-5.0
-#         self.rho0=1.0 
-#         self.rho_cr=tm.log(2.0)
-#         self.rho_liq=1.95
-#         self.rho_gas=0.15
-#         self.solidCof=0.5
-#         self.rho_solid=self.rho_gas+self.solidCof*(self.rho_liq-self.rho_gas)
+@ti.data_oriented
+class HuangMRTCollision(MRTCollision):
+    def __init__(self,num_components,k1,epslion):
+        super().__init__(num_components)
+        self.k1=ti.field(float, shape=(num_components,)) 
+        self.k2=ti.field(float, shape=(num_components,)) 
 
-#     def ShanChenSetting(self,rho_liq=1.95,rho_gas=0.15,rho_solid_cof=0.9,gA=-5.0):
-#         self.rho_liq=rho_liq
-#         self.rho_gas=rho_gas
-#         self.rho_solid=self.rho_gas+rho_solid_cof*(self.rho_liq-self.rho_gas)
-#         self.gA=gA
+        for component in range(self.num_components[None]):
+            self.k1[component]=k1[component]
+            self.k2[component]=epslion[component]/(-8.)-k1[component]
 
-#     @ti.func
-#     def psi(self,dens):
-#         return self.rho0*(1.0-tm.exp(-dens/self.rho0))
 
-#     @ti.func
-#     def m_Q(self,F,rho):
-#         Qm=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-#         F2=tm.dot(F,F)
-#         a=3*(self.k1+2*self.k2)*F2
-#         b=self.gA*self.psi(rho)**2
+    @ti.func
+    def m_Q(self,F,rho,component,g):
+        Qm=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+        F2=tm.dot(F,F)
+        a=3*(self.k1[component]+2*self.k2[component])*F2
+        b=g*self.psi(rho)**2
         
-#         Qm[1]=a/b
-#         Qm[2]=-Qm[1]
-#         Qm[7]=self.k1*(F[0]**2-F[1]**2)/b
-#         Qm[8]=self.k1*F[0]*F[1]/b
+        Qm[1]=a/b
+        Qm[2]=-Qm[1]
+        Qm[7]=self.k1[component]*(F[0]**2-F[1]**2)/b
+        Qm[8]=self.k1[component]*F[0]*F[1]/b
 
-#         return Qm
+        return Qm
     
-#     @ti.kernel
-#     def apply(self,lb_field:ti.template()):
-#         for idx in range(lb_field.fluid_boundary.count[None]):
-#             i,j = lb_field.fluid_boundary.group[idx]
+    @ti.kernel
+    def apply(self,lb_field:ti.template(),sc_field:ti.template()):
+        for idx in range(lb_field.fluid_boundary.count[None]):
+            i,j = lb_field.fluid_boundary.group[idx]
+            for component in range(self.num_components[None]):
+                m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+                a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+                b=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+                c=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+                fpop2=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
 
-#             m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-#             a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-#             b=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-#             c=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-#             fpop2=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+                #Transform to moment space
+                for ii in ti.static(range(9)):
+                    for jj in ti.static(range(9)):
+                        ti.atomic_add(m[ii],self.M[ii,jj]*lb_field.f[component,i,j][jj])
 
-#             #Transform to moment space
-#             for ii in ti.static(range(9)):
-#                 for jj in ti.static(range(9)):
-#                     ti.atomic_add(m[ii],self.M[ii,jj]*lb_field.f[i,j][jj])
+                meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[component,i,j]) #Compute equilibrium moments
+                mf=self.m_force(lb_field.body_force[component,i,j],lb_field.vel[i,j]) #Guo Forcing
+                mQ=self.m_Q(lb_field.body_force[component,i,j],lb_field.rho[component,i,j],component,sc_field.g[component]) # huang
 
-#             meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j]) #Compute equilibrium moments
-#             mf=self.m_force(lb_field.body_force[i,j],lb_field.vel[i,j]) #Guo Forcing
-#             mQ=self.m_Q(lb_field.body_force[i,j],lb_field.rho[i,j]) # huang
+                for ii in ti.static(range(9)):
+                    a[ii]=self.diag[component,ii]*(m[ii]-meq[ii])
+                    b[ii]=(1.0-self.diag[component,ii]/2.0)*(mf[ii])
+                    c[ii]=self.diag[component,ii]*mQ[ii]
 
-#             for ii in ti.static(range(9)):
-#                 a[ii]=self.diag[ii]*(m[ii]-meq[ii])
-#                 b[ii]=(1.0-self.diag[ii]/2.0)*(mf[ii])
-#                 c[ii]=self.diag[ii]*mQ[ii]
+                m2=m-a+b+c#Collide
 
-#             m2=m-a+b+c#Collide
+                #Transform to population space
+                for ii in ti.static(range(9)):
+                    for jj in ti.static(range(9)):
+                        ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
 
-#             #Transform to population space
-#             for ii in ti.static(range(9)):
-#                 for jj in ti.static(range(9)):
-#                     ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
-
-#             lb_field.f2[i,j]=fpop2
+                lb_field.f2[component,i,j]=fpop2

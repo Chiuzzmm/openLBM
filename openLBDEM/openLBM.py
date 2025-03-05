@@ -1,5 +1,10 @@
 import numpy as np
 import taichi as ti
+
+
+
+
+
 @ti.data_oriented
 class MaskAndGroup:
     def __init__(self,NX,NY):
@@ -182,8 +187,29 @@ class MacroscopicEngine:
                     lb_field.rho[component,i,j]+=lb_field.f[component,i,j][k]
                 lb_field.total_rho[i,j]+=lb_field.rho[component,i,j]
 
+
+
+
     @ti.kernel
-    def pressure(self,lb_field:ti.template(),sc_field:ti.template()):
+    def pressure0(self,lb_field:ti.template()):
+        lb_field.pressure.fill(.0)
+        for m in range(lb_field.fluid_boundary.count[None]):
+            i,j=lb_field.fluid_boundary.group[m]
+            lb_field.pressure[0, i, j]+= (lb_field.rho[0, i, j])/3.0
+
+            lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
+
+    @ti.kernel
+    def pressure1(self,lb_field:ti.template(),sc_field:ti.template()):
+        lb_field.pressure.fill(.0)
+        for m in range(lb_field.fluid_boundary.count[None]):
+            i,j=lb_field.fluid_boundary.group[m]
+            lb_field.pressure[0, i, j] += (lb_field.rho[0, i, j] + 0.5 * sc_field.g * sc_field.psi(lb_field.rho[0, i, j]) ** 2) / 3.0
+
+            lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
+
+    @ti.kernel
+    def pressure2(self,lb_field:ti.template(),sc_field:ti.template()):
         lb_field.pressure.fill(.0)
         for m in range(lb_field.fluid_boundary.count[None]):
             i,j=lb_field.fluid_boundary.group[m]
@@ -209,6 +235,16 @@ class MacroscopicEngine:
             #         p_ij+=sc_field.g[component1,component2]*sc_field.psi(lb_field.rho[component1,i,j])*sc_field.psi(lb_field.rho[component2,i,j])/2.0
 
             # lb_field.total_pressure[i,j]=p_ii+p_ij/3.0
+
+    def pressure(self,lb_field:ti.template(),sc_field=None):
+        if sc_field==None:
+            self.pressure0(lb_field)
+        else:
+            if lb_field.num_components[None]==1:
+                self.pressure1(lb_field,sc_field)
+            else:
+                self.pressure2(lb_field,sc_field)
+        
 
 
     @ti.kernel
@@ -305,7 +341,7 @@ class MacroscopicEngine:
         
             fout.write("SCALARS Pressure double\n")  
             fout.write("LOOKUP_TABLE Pressure_table\n")  
-            np.savetxt(fout, pressure * lb_field.C_pressure/3.0, fmt='%.8f') 
+            np.savetxt(fout, pressure * lb_field.C_pressure, fmt='%.8f') 
 
 
             fout.write("VECTORS velocity double\n")  
@@ -318,3 +354,5 @@ class MacroscopicEngine:
 
 
         print(filename)
+
+
