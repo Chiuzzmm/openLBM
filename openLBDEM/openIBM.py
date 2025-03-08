@@ -50,18 +50,21 @@ class SphereIB():
             self.Sphere[m].torque = torque_np[m]
             self.Sphere[m].radius = radius_np[m]
             self.Sphere[m].angle = angle_np[m]
-        print("init balls")
+        print(f"init {num} balls")
+
 
 
     @ti.kernel
     def init_IB_nodes(self):
+        num=0
         for m in range(self.num[None]):
             self.Sphere[m].NumIB= int(ti.round(tm.pi * 2 * self.Sphere[m].radius / self.NUMIB_cof))
             for n in range(self.Sphere[m].NumIB):
                 angle = 2.0 * math.pi * n / self.Sphere[m].NumIB
                 self.IBNodes[m,n].pos.x=self.Sphere[m].pos.x+self.Sphere[m].radius*tm.cos(angle)
                 self.IBNodes[m,n].pos.y=self.Sphere[m].pos.y+self.Sphere[m].radius*tm.sin(angle)
-        print("init IB nodes")
+            num+=self.Sphere[m].NumIB
+        print(f"init {self.num[None]} balls with {num} IB nodes")
 
     @ti.func
     def computer_IB_nodes_pos(self,m,n):
@@ -112,6 +115,8 @@ class IBDEMCouplerEngine():
             flag=1
         return flag
     
+
+
     @ti.kernel
     def SphereIBUpdate(self,sphere_field:ti.template()):
 
@@ -233,9 +238,10 @@ class IBEngine():
                 f_temp=ti.Vector([0.0,0.0])
                 f_temp+=sphere_field.IBNodes[m,n].force_temp*weight
                 #Correct previous Eulerian velocity
-                r2=lb_filed.rho[iX,iY]*2
+                r2=lb_filed.total_rho[iX,iY]*2.0
                 lb_filed.vel[iX,iY]+=f_temp/r2
-                lb_filed.body_force[iX,iY]+=f_temp
+                for component in  range(lb_field.num_components[None]):
+                    lb_filed.body_force[component,iX,iY]+=(f_temp*lb_filed.rho[component,iX,iY]/lb_filed.total_rho[iX,iY])
 
 
 

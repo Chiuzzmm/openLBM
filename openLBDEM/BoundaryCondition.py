@@ -5,6 +5,20 @@ import numpy as np
 
 @ti.data_oriented
 class BoundaryCondition:
+    def __init__(self,direction):
+        self.direction = direction
+        # 根据方向确定需要设置的分布函数分量
+        if direction==3:
+            self.components = [1, 5, 8]
+        elif direction==1:
+            self.components = [3, 6, 7]
+        elif direction==2:
+            self.components=[4,7,8]
+        elif direction==4:
+            self.components=[2,5,6]
+        elif direction==None:
+            self.components=None
+
     @ti.kernel
     def apply(self):
         pass
@@ -29,7 +43,7 @@ class BoundaryCondition:
 
 @ti.data_oriented
 class WettingBoundary(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),rho_solid_cof:float,rho_solid:float):
+    def __init__(self,boundary_group:ti.template(),rho_solid:float):
         super().__init__()
         self.boundary_group=boundary_group
         self.rho_solid=rho_solid
@@ -42,12 +56,12 @@ class WettingBoundary(BoundaryCondition):
     
 
 @ti.data_oriented
-class VelocityInlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),velocity): # type: ignore
-        super().__init__()
+class VelocityBoundary(BoundaryCondition):
+    def __init__(self,boundary_group:ti.template(),velocity_value,direction): # type: ignore
+        super().__init__(direction)
         self.boundary_group=boundary_group
-        self.velocity_in=velocity
-
+        self.velocity_value=velocity_value
+        print(f"  add velocity boundary, vel=: {self.velocity_value}")
 
     @ti.kernel
     def apply(self, lb_field:ti.template()):
@@ -55,76 +69,48 @@ class VelocityInlet(BoundaryCondition):
         for m in range(self.boundary_group.count[None]):
             i,j=self.boundary_group.group[m]
             for component in range(lb_field.num_components[None]):
-                cv=lb_field.c[1,0]*self.velocity_in.x+lb_field.c[1,1]*self.velocity_in.y
-                lb_field.f[component,i,j][1]+=6*lb_field.weights[1]*lb_field.rho[component,i,j]*cv
-
-                cv=lb_field.c[5,0]*self.velocity_in.x+lb_field.c[5,1]*self.velocity_in.y
-                lb_field.f[component,i,j][5]+=6*lb_field.weights[5]*lb_field.rho[component,i,j]*cv
-
-                cv=lb_field.c[8,0]*self.velocity_in.x+lb_field.c[8,1]*self.velocity_in.y
-                lb_field.f[component,i,j][8]+=6*lb_field.weights[8]*lb_field.rho[component,i,j]*cv
+                for d in ti.static(self.components):
+                    cv=lb_field.c[d,0]*self.velocity_value.x+lb_field.c[d,1]*self.velocity_value.y
+                    lb_field.f[component,i,j][d]+=6*lb_field.weights[d]*lb_field.rho[component,i,j]*cv
 
 @ti.data_oriented
-class PressureInlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),rho_in): # type: ignore
-        super().__init__()
-        self.boundary_group=boundary_group
-        self.rho_in=rho_in
+class PressureBoundary(BoundaryCondition):
+    def __init__(self, boundary_group: ti.template(), rho_value, direction):
+        super().__init__(direction)
+        self.boundary_group = boundary_group
+        self.rho_value = rho_value
+        print(f"  add pressure boundary, rho=: {self.rho_value}")
 
     @ti.kernel
-    def apply(self, lb_field:ti.template()):
+    def apply(self, lb_field: ti.template()):
         for m in range(self.boundary_group.count[None]):
-            i,j=self.boundary_group.group[m]
-            ix2=lb_field.neighbor[i,j][3,0]
-            iy2=lb_field.neighbor[i,j][3,1]
+            i, j = self.boundary_group.group[m]
+            ix2 = lb_field.neighbor[i, j][self.direction, 0]
+            iy2 = lb_field.neighbor[i, j][self.direction, 1]
             for component in range(lb_field.num_components[None]):
-                # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
-                # lb_field.rho[i,j]=self.rho_in
-                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
+                # 计算外推速度
+                uw = 1.5 * lb_field.vel[i, j] - 0.5 * lb_field.vel[ix2, iy2]
+                lb_field.vel[i, j] = uw
+                lb_field.total_rho[i, j] = self.rho_value
+                # 调用ABC方法计算分布函数
+                ftemp = self.ABC(lb_field.c, lb_field.weights, lb_field.f[component, i, j], self.rho_value, uw)
+                # 更新特定方向的分布函数分量
+                for d in ti.static(self.components):
+                    lb_field.f[component, i, j][d] = ftemp[d]
 
-                #ABC
-                uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
-                lb_field.vel[i,j]=uw
-                lb_field.total_rho[i,j]=self.rho_in
-                ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[component,i,j],self.rho_in,uw)
-                lb_field.f[component,i,j][1]=ftemp[1]
-                lb_field.f[component,i,j][5]=ftemp[5]
-                lb_field.f[component,i,j][8]=ftemp[8]
-
-@ti.data_oriented
-class PressureOutlet(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template(),rho_out): # type: ignore
-        super().__init__()
-        self.boundary_group=boundary_group
-        self.rho_out=rho_out
-
-    @ti.kernel
-    def apply(self, lb_field:ti.template()):
-        for m in range(self.boundary_group.count[None]):
-            i,j=self.boundary_group.group[m]
-            ix2=lb_field.neighbor[i,j][1,0]
-            iy2=lb_field.neighbor[i,j][1,1]
-
-            for component in range(lb_field.num_components[None]):
                 #NEEM
-                # lb_field.rho[i,j]=self.rho_out
                 # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
-                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2],lb_field.f[ix2,iy2])
+                # lb_field.rho[i,j]=self.rho_value
+                # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j],lb_field.vel[ix2,iy2],lb_field.rho[component,ix2,iy2],lb_field.f[component,ix2,iy2])
 
-                #ABC
-                uw=1.5*lb_field.vel[i,j]-0.5*lb_field.vel[ix2,iy2]
-                lb_field.vel[i,j]=uw
-                lb_field.total_rho[i,j]=self.rho_out
-                ftemp=self.ABC(lb_field.c,lb_field.weights,lb_field.f[component,i,j],self.rho_out,uw)
-                lb_field.f[component,i,j][3]=ftemp[3]
-                lb_field.f[component,i,j][6]=ftemp[6]
-                lb_field.f[component,i,j][7]=ftemp[7]
 
 @ti.data_oriented
 class BounceBackWall(BoundaryCondition):
-    def __init__(self,boundary_group:ti.template()):
-        super().__init__()
+    def __init__(self,boundary_group:ti.template(),direction):
+        super().__init__(direction)
         self.boundary_group=boundary_group
+        print(f"  add Boundary wall")
+
 
     @ti.kernel
     def apply(self, lb_field:ti.template()): # type: ignore

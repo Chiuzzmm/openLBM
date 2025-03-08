@@ -4,27 +4,26 @@ import os
 # 添加包的路径
 sys.path.append(os.path.join(os.path.dirname(__file__), "openLBM"))
 
-
 import taichi as ti
 import openLBDEM
 import numpy as np
 from matplotlib import cm
 import time
 
-
+print("\n" * 50)
 ti.init(arch=ti.gpu)
 
 #mesh 
 scale=1e-3
 domainx=1*scale
 domainy=1*scale
-NX_LB =int(20*10)
-NY_LB =int(20*10)
-Cl=domainx/NX_LB
+NX_LB =int(20*10)+1
+NY_LB =int(20*10)+1
+Cl=domainx/(NX_LB-1)
 
 
 # flow boundary condition
-InletMode=1
+
 Umax=1e-3
 
 # flow info
@@ -106,35 +105,52 @@ def lbm_solve():
     sc_engine.apply(lb_field)
     macroscopic_engine.force_density(lb_field)
     macroscopic_engine.velocity(lb_field)
-    
     collision_engine.apply(lb_field)
-
     collision_engine.stream_periodic(lb_field)
     
     # boundary_engine.apply_boundary_conditions(lb_field)
     
+def post():
+    pressure = cm.Blues(macroscopic_engine.post_pressure(lb_field))
+    vel_img = cm.plasma(macroscopic_engine.post_vel(lb_field))
+    img1 = np.concatenate((pressure, vel_img), axis=1)
+    return img1
+
 
 start_time = time.time()
 gui = ti.GUI(name, (1*NX_LB,2*NY_LB)) 
+result_dir = "./results"
+video_manager = ti.tools.VideoManager(output_dir=result_dir, framerate=24, automatic_build=False)
 
-while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-    for i in range (1):
+
+showmode=1 #1=while # 0=iterations
+
+if showmode==1:
+    while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
         for j in range(10):
             lbm_solve()
+        img=post()
 
-        pressure = cm.Blues(macroscopic_engine.post_pressure(lb_field))
-        vel_img = cm.plasma(macroscopic_engine.post_vel(lb_field))
-        img1 = np.concatenate((pressure, vel_img), axis=1)
-
-    
-        # img2=cm.magma(macroscopic_engine.post_MC_pressure(lb_field))
-        # img=np.concatenate((img1,img2),axis=0)
-        gui.set_image(img1)
+        gui.set_image(img)
         gui.show()
+else:
+    for i in range(50):
+        for j in range(100):
+            lbm_solve()
+        img=post()
+        gui.set_image(img)
+        gui.show()
+        filename="test"+'%d' % i
+        # savefilename = f'2C_unMix_{i:05d}.png'   # create filename with suffix png
+        # gui.show(savefilename)
+
+        video_manager.write_frame(img)
 
 
-        # filename="test"+'%d' % i
-        # macroscopic_engine.writeVTK(filename,lb_field)
-        # end_time = time.time()
-        # elapsed_time = (end_time - start_time)
-        # print({elapsed_time})
+    print('Exporting .mp4 and .gif videos...')
+    video_manager.make_video(gif=True, mp4=False)
+    print(f'GIF video is saved to {video_manager.get_output_filename(".gif")}')
+    # macroscopic_engine.writeVTK(filename,lb_field)
+    # end_time = time.time()
+    # elapsed_time = (end_time - start_time)
+    # print({elapsed_time})

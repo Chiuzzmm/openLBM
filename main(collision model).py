@@ -10,7 +10,7 @@ import openLBDEM
 import numpy as np
 from matplotlib import cm
 import time
-
+import matplotlib.pyplot as plt
 
 
 ti.init(arch=ti.gpu)
@@ -38,7 +38,6 @@ p8=[Length_XX2,Length_YY2]
 
 
 # flow boundary condition
-InletMode=1
 Umax=1e-2
 pressure_lnlet=10
 
@@ -77,9 +76,9 @@ boundary_engine.Mask_rectangle_identify(lb_field,p6[0]/Cl-0.5,p2[0]/Cl-0.5,p6[1]
 boundary_engine.Mask_rectangle_identify(lb_field,p4[0]/Cl-0.5,p8[0]/Cl-0.5,p4[1]/Cl-0.5,p8[1]/Cl-0.5)
 boundary_engine.boundary_identify(lb_field)
 boundary_engine.writing_boundary(lb_field)
-boundary_engine.add_boundary_condition(openLBDEM.BounceBackWall(lb_field.wall_boundary))
-boundary_engine.add_boundary_condition(openLBDEM.VelocityInlet(lb_field.inlet_boundary,ULB))
-boundary_engine.add_boundary_condition(openLBDEM.PressureOutlet(lb_field.outlet_boundary,1.0))
+boundary_engine.add_boundary_condition(openLBDEM.BounceBackWall(lb_field.wall_boundary,None))
+boundary_engine.add_boundary_condition(openLBDEM.VelocityBoundary(lb_field.inlet_boundary,ULB,3))
+boundary_engine.add_boundary_condition(openLBDEM.PressureBoundary(lb_field.outlet_boundary,1.0,1))
 
 #==============================================
 macroscopic_engine=openLBDEM.MacroscopicEngine()
@@ -92,9 +91,10 @@ macroscopic_engine=openLBDEM.MacroscopicEngine()
 
 collision_engine=openLBDEM.MRTCollision(num_components)
 collision_engine.unit_conversion(lb_field)
-
-
 #==============================================
+post_processing_engine=openLBDEM.PostProcessingEngine(0)
+
+
 lb_field.init_hydro(ULB,0.0)
 lb_field.init_LBM(collision_engine)
 
@@ -118,25 +118,52 @@ def lbm_solve():
     
     pass
 
+def post():
+    pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
+    vel_img = cm.plasma(post_processing_engine.post_vel(lb_field))
+    img1 = np.concatenate((pressure, vel_img), axis=1)
+    return img1
+
+showmode=1 #1=while # 0=iterations
 start_time = time.time()
 gui = ti.GUI(name, (NX_LB,2*NY_LB)) 
 
-# while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-for i in range (5):
-    for j in range(20):
-        lbm_solve()
+if showmode==1:
+    while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
+        for i in range(10):
+            for j in range(20):
+                lbm_solve()
+            img=post()
+            gui.set_image(img)
+            gui.show()
+        print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
+
+else:
+    video_manager = ti.tools.VideoManager(output_dir="./results", framerate=24, automatic_build=False)
+    for i in range(50):
+        for j in range(100):
+            lbm_solve()
+        img=post()
+        gui.set_image(img)
+        gui.show()
+        print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
+
+        filename="test"+'%d' % i
+        # savefilename = f'2C_unMix_{i:05d}.png'   # create filename with suffix png
+        # gui.show(savefilename)
+        # post_processing_engine.writeVTK(filename,lb_field)
+        # end_time = time.time()
+        # elapsed_time = (end_time - start_time)
+        # print({elapsed_time})
 
 
+        video_manager.write_frame(img)
+    print('Exporting .mp4 and .gif videos...')
+    video_manager.make_video(gif=True, mp4=False)
+    print(f'GIF video is saved to {video_manager.get_output_filename(".gif")}')
 
-    pressure = cm.Blues(macroscopic_engine.post_pressure(lb_field)/0.05)
-    vel_img = cm.plasma(macroscopic_engine.post_vel(lb_field))
-    img1 = np.concatenate((pressure, vel_img), axis=1)
 
-    gui.set_image(img1)
-    gui.show()
-
-    filename="test"+'%d' % i
-    macroscopic_engine.writeVTK(filename,lb_field)
-    end_time = time.time()
-    elapsed_time = (end_time - start_time)
-    print({elapsed_time})
+# 在计算结束后显示绘图窗口
+if showmode == 2:
+    plt.ioff()  # 关闭交互模式
+    plt.show()  # 显示绘图窗口并进入事件循环
