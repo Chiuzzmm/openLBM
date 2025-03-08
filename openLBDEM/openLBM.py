@@ -1,6 +1,5 @@
-import numpy as np
-import taichi as ti
 
+import taichi as ti
 
 
 
@@ -29,6 +28,13 @@ class LBField:
         self.NY=NY
         self.num_components=ti.field(int,shape=())
         self.num_components[None]=num_components
+
+        print("="*20)
+        print("init LBField")
+        print(f"  NX (网格数): {self.NX}")
+        print(f"  NY (网格数): {self.NY}")
+        print(f"  组分数量 : {self.num_components[None]}")
+
 
         # 分布函数（双缓冲）
         self.f = ti.Vector.field(9, float, shape=(num_components,NX, NY)) #populations (old)
@@ -100,6 +106,16 @@ class LBField:
         for component in range(self.num_components[None]):
             self.shear_viscosity_LB[component]=shear_viscosity[component]/self.Cnu
             self.bulk_viscosity_LB[component]=bulk_viscosity[component]/self.Cnu
+
+        print("="*20)
+        print("init conversion")
+        print(f"  Cl : {self.Cl}")
+        print(f"  Ct : {self.Ct}")
+        print(f"  C_rho : {self.C_rho}")
+        
+        for component in range(self.num_components[None]):
+            print(f"    shear viscosity LB: {self.shear_viscosity_LB[component]}")
+
 
     def set_gravity(self,g):
         self.gravity_force=g
@@ -270,89 +286,3 @@ class MacroscopicEngine:
                 lb_field.vel[i,j]+=vel_temp
             
             lb_field.vel[i, j] /= lb_field.total_rho[i, j]
-
-
-    def nomalized_field(self,data):
-        min_val=np.min(data)
-        max_val=np.max(data)
-        normalized_data=(data-min_val)/(max_val-min_val)
-        return normalized_data
-    
-
-    def post_pressure(self,lb_field:ti.template()):
-        return self.nomalized_field(lb_field.total_pressure.to_numpy())
-
-
-
-    def post_MC_pressure(self,lb_field:ti.template()):
-        images = []
-        for component in range(lb_field.num_components[None]):
-            data = self.nomalized_field(lb_field.pressure.to_numpy()[component,:,:])
-            images.append(data)
-        
-        return np.concatenate(images, axis=1)
-
-
-    def post_vel(self,lb_field:ti.template()):
-        vel = lb_field.vel.to_numpy()
-        vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
-        return self.nomalized_field(vel_mag)
-    
-
-
-    def writeVTK(self,fname,lb_field:ti.template()):
-        rho=lb_field.total_rho.to_numpy().T.flatten()  
-        vel=lb_field.vel.to_numpy()
-        velx=vel[:,:,0].T.flatten()  
-        vely=vel[:,:,1].T.flatten()  
-
-        pressure=lb_field.total_pressure.to_numpy().T.flatten()  
-
-        # bodyforce=lb_field.body_force.to_numpy()
-        # bodyforcex=bodyforce[:,:,0].T.flatten()
-        # bodyforcey=bodyforce[:,:,1].T.flatten()
-
-        x_coords = np.arange(lb_field.NX)  
-        y_coords = np.arange(lb_field.NY)  
-        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  
-
-        x_flat = x_mesh.flatten()  
-        y_flat = y_mesh.flatten()  
-
-
-        filename = fname + ".vtk"  
-        with open(filename, 'w') as fout:  
-            fout.write("# vtk DataFile Version 3.0\n")  
-            fout.write("Hydrodynamics representation\n")  
-            fout.write("ASCII\n\n")  
-            fout.write("DATASET STRUCTURED_GRID\n")  
-            fout.write(f"DIMENSIONS {lb_field.NX} {lb_field.NY} 1\n")  
-            fout.write(f"POINTS {lb_field.NX*lb_field.NY} double\n")  
-          
-            np.savetxt(fout, np.column_stack((x_flat, y_flat, np.zeros_like(x_flat))), fmt='%.0f')  
-          
-            fout.write("\n")  
-            fout.write(f"POINT_DATA {lb_field.NX*lb_field.NY}\n")  
-
-
-            fout.write("SCALARS density double\n")  
-            fout.write("LOOKUP_TABLE density_table\n")  
-            np.savetxt(fout, rho * lb_field.C_rho, fmt='%.8f') 
-        
-            fout.write("SCALARS Pressure double\n")  
-            fout.write("LOOKUP_TABLE Pressure_table\n")  
-            np.savetxt(fout, pressure * lb_field.C_pressure, fmt='%.8f') 
-
-
-            fout.write("VECTORS velocity double\n")  
-            velocity_data = np.column_stack((velx * lb_field.Cu, vely * lb_field.Cu, np.zeros_like(velx)))  
-            np.savetxt(fout, velocity_data, fmt='%.8f') 
-  
-            # fout.write("VECTORS f double\n")  
-            # bodyforce = np.column_stack((bodyforcex, bodyforcey, np.zeros_like(bodyforcex)))  
-            # np.savetxt(fout, bodyforce, fmt='%.8f') 
-
-
-        print(filename)
-
-

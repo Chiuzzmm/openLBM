@@ -25,10 +25,10 @@ class CollisionAndStream:
     def stream_inside(self,lb_field:ti.template()):
         for m in range(lb_field.inside_boundary.count[None]):
             i,j =lb_field.inside_boundary.group[m]
-            for component in  range(self.num_components[None]):
-                for k in ti.static(range(lb_field.NPOP)):
-                    ix2=lb_field.neighbor[i,j][k,0]
-                    iy2=lb_field.neighbor[i,j][k,1]
+            for k in ti.static(range(lb_field.NPOP)):
+                ix2=lb_field.neighbor[i,j][k,0]
+                iy2=lb_field.neighbor[i,j][k,1]
+                for component in  range(self.num_components[None]):
                     lb_field.f[component,i,j][k]=lb_field.f2[component,ix2,iy2][k]
 
 
@@ -36,10 +36,10 @@ class CollisionAndStream:
     def stream_periodic(self,lb_field:ti.template()):
         for m in range(lb_field.fluid_boundary.count[None]):
             i,j = lb_field.fluid_boundary.group[m]
-            for component in  range(self.num_components[None]):
-                for k in ti.static(range(lb_field.NPOP)):
-                    x2=(i-lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
-                    y2=(j-lb_field.c[k,1]+lb_field.NY)%lb_field.NY
+            for k in ti.static(range(lb_field.NPOP)):
+                x2=(i-lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
+                y2=(j-lb_field.c[k,1]+lb_field.NY)%lb_field.NY
+                for component in  range(self.num_components[None]):
                     lb_field.f[component,i,j][k]=lb_field.f2[component,x2,y2][k]
 
 
@@ -221,11 +221,15 @@ class MRTCollision(CollisionAndStream):
     def unit_conversion(self,lb_field:ti.template(),omega_q=1,omega_epsilon=1):
         self.diag.fill(1.0)
         for component in range(self.num_components[None]):
-            self.diag[component,7]=self.diag[component,8]=1/(lb_field.shear_viscosity_LB[component]*3.0+0.5)
-            self.diag[component,1]=1/(lb_field.bulk_viscosity_LB[component]*3.0+0.5)
+            self.diag[component,7]=self.diag[component,8]=1.0/(lb_field.shear_viscosity_LB[component]*3.0+0.5)
+            self.diag[component,1]=1.0/(lb_field.bulk_viscosity_LB[component]*3.0+0.5)
             # omega_q=1.0
             # omega_epsilon=1.0
 
+        print("="*20)
+        print("relaxation_pars")
+        for component in range(self.num_components[None]):
+            print(f"  tau: {1.0/self.diag[component,7]}")
 
     @ti.func
     def m_eq(self,vel,rho):

@@ -7,3 +7,5 @@ from .CollisionEngine import BGKCollision, TRTCollision, MRTCollision,HuangMRTCo
 
 from .openIBM import SphereIB,IBDEMCouplerEngine,IBEngine
 from .ExternalForce import ShanChenForceC1,ShanChenForceC2
+
+from .PostProcessing import PostProcessingEngine

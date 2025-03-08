@@ -167,7 +167,15 @@ class BoundaryEngine:
         lb_field.wall_boundary.sort()
         lb_field.inlet_boundary.sort()
         lb_field.outlet_boundary.sort()
+
+        print("="*20)
         print("Boundary identify")
+        print(f"  fluid_boundary size: {lb_field.fluid_boundary.count}")
+        print(f"  inside_boundary size: {lb_field.inside_boundary.count}")
+        print(f"  wall_boundary size: {lb_field.wall_boundary.count}")
+        print(f"  inlet_boundary size: {lb_field.inlet_boundary.count}")
+        print(f"  outlet_boundary size: {lb_field.outlet_boundary.count}")
+
 
     @ti.kernel
     def boundary_classify(self,lb_field:ti.template()):
@@ -259,7 +267,7 @@ class BoundaryEngine:
         img_np=lb_field.img.to_numpy()
         img_pil=Image.fromarray((img_np*255).astype(np.uint8))
         img_pil.save('boundary.png')
-        print("writing_boundary")
+        print("writing boundary finish")
 
     @ti.kernel
     def Mask_rectangle_identify(self,lb_field:ti.template(),xmin:float,xmax:float,ymin:float,ymax:float):
