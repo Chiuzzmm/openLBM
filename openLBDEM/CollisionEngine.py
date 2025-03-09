@@ -4,9 +4,10 @@ import taichi.math as tm
 
 
 class CollisionAndStream:
-    def __init__(self,num_components):
+    def __init__(self,num_components,group):
         self.num_components=ti.field(int,shape=())
         self.num_components[None]=num_components
+        self.group=group
 
     @ti.func
     def f_eq(self,c,w,vel,rho):
@@ -21,32 +22,11 @@ class CollisionAndStream:
         uF=tm.dot(vel,F)
         return w*(3*cF+9*cF*cu-3*uF)
     
-    @ti.kernel
-    def stream_inside(self,lb_field:ti.template()):
-        for m in range(lb_field.inside_boundary.count[None]):
-            i,j =lb_field.inside_boundary.group[m]
-            for k in ti.static(range(lb_field.NPOP)):
-                ix2=lb_field.neighbor[i,j][k,0]
-                iy2=lb_field.neighbor[i,j][k,1]
-                for component in  range(self.num_components[None]):
-                    lb_field.f[component,i,j][k]=lb_field.f2[component,ix2,iy2][k]
-
-
-    @ti.kernel
-    def stream_periodic(self,lb_field:ti.template()):
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j = lb_field.fluid_boundary.group[m]
-            for k in ti.static(range(lb_field.NPOP)):
-                x2=(i-lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
-                y2=(j-lb_field.c[k,1]+lb_field.NY)%lb_field.NY
-                for component in  range(self.num_components[None]):
-                    lb_field.f[component,i,j][k]=lb_field.f2[component,x2,y2][k]
-
 
 @ti.data_oriented
 class BGKCollision(CollisionAndStream):
-    def __init__(self,num_components):
-        super().__init__(num_components)
+    def __init__(self,num_components,group):
+        super().__init__(num_components,group)
         self.tau_sym_LB=ti.field(float, shape=(num_components,)) 
         self.omega=ti.field(float, shape=(num_components,)) 
 
@@ -61,8 +41,8 @@ class BGKCollision(CollisionAndStream):
 
     @ti.kernel#LBM solve
     def apply(self,lb_field:ti.template()):
-        for idx in range(lb_field.fluid_boundary.count[None]):
-            i,j = lb_field.fluid_boundary.group[idx]
+        for idx in range(self.group.count[None]):
+            i,j = self.group.group[idx]
             
             for component in range(self.num_components[None]):
                 feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j])
@@ -76,8 +56,8 @@ class BGKCollision(CollisionAndStream):
 
 @ti.data_oriented
 class TRTCollision(CollisionAndStream):
-    def __init__(self,num_components,magic):
-        super().__init__(num_components)
+    def __init__(self,num_components,group,magic):
+        super().__init__(num_components,group)
         self.magic=ti.field(float, shape=(num_components,)) 
         self.tau_sym=ti.field(float, shape=(num_components,)) 
         self.tau_antisym=ti.field(float, shape=(num_components,)) 
@@ -145,8 +125,8 @@ class TRTCollision(CollisionAndStream):
     
     @ti.kernel#LBM solve
     def apply(self,lb_field:ti.template()):
-        for idx in range(lb_field.fluid_boundary.count[None]):
-            i,j = lb_field.fluid_boundary.group[idx]
+        for idx in range(self.group.count[None]):
+            i,j = self.group.group[idx]
             for component in range(self.num_components[None]):
                 feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j])
                 force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.body_force[component,i,j],lb_field.vel[i,j])
@@ -166,8 +146,8 @@ class TRTCollision(CollisionAndStream):
 
 @ti.data_oriented
 class MRTCollision(CollisionAndStream):
-    def __init__(self,num_components):
-        super().__init__(num_components)
+    def __init__(self,num_components,group):
+        super().__init__(num_components,group)
         self.M=ti.field(float,shape=(9,9))
         self.M_inverse=ti.field(float,shape=(9,9))
         M_np =np.array([
@@ -270,8 +250,8 @@ class MRTCollision(CollisionAndStream):
     
     @ti.kernel#LBM solve
     def apply(self,lb_field:ti.template()):
-        for idx in range(lb_field.fluid_boundary.count[None]):
-            i,j = lb_field.fluid_boundary.group[idx]
+        for idx in range(self.group.count[None]):
+            i,j = self.group.group[idx]
             for component in range(self.num_components[None]):
                 m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
                 a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
@@ -301,8 +281,8 @@ class MRTCollision(CollisionAndStream):
 
 @ti.data_oriented
 class HuangMRTCollision(MRTCollision):
-    def __init__(self,num_components,k1,epslion):
-        super().__init__(num_components)
+    def __init__(self,num_components,group,k1,epslion):
+        super().__init__(num_components,group)
         self.k1=ti.field(float, shape=(num_components,)) 
         self.k2=ti.field(float, shape=(num_components,)) 
 
@@ -327,8 +307,8 @@ class HuangMRTCollision(MRTCollision):
     
     @ti.kernel
     def apply(self,lb_field:ti.template(),sc_field:ti.template()):
-        for idx in range(lb_field.fluid_boundary.count[None]):
-            i,j = lb_field.fluid_boundary.group[idx]
+        for idx in range(self.group.count[None]):
+            i,j = self.group.group[idx]
             for component in range(self.num_components[None]):
                 m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
                 a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])

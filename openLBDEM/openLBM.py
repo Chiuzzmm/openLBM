@@ -63,20 +63,10 @@ class LBField:
 
 
         self.neighbor=ti.Matrix.field(n=9,m=2,dtype=int,shape=(self.NX,self.NY))
-        self.neighbor_boundary=ti.Vector.field(9,dtype=int,shape=(self.NX,self.NY))
 
-        self.mask=ti.field(int,shape=(self.NX,self.NY)) # 掩码：1-流体, -1-固体, 2-亲水固体, 3-疏水
-        
-        self.fluid_boundary=MaskAndGroup(self.NX,self.NY)# Fluid=wall+insider
-        self.inside_boundary=MaskAndGroup(self.NX,self.NY)
-        self.wall_boundary=MaskAndGroup(self.NX,self.NY)#wall=fluid boundary
-        self.inlet_boundary=MaskAndGroup(self.NX,self.NY)#wall>inlet
-        self.outlet_boundary=MaskAndGroup(self.NX,self.NY)#wall>outlet
+        self.mask=ti.field(int,shape=(self.NX,self.NY)) # 掩码：1-流体, -1-固体
 
-        #post
-        self.img=ti.Vector.field(3,dtype=ti.f32,shape=(self.NX,self.NY))
-        
-        self.neighbor_boundary.fill([0,0,0,0,0,0,0,0,0])
+
         self.mask.fill(1)
         self.SCforce.fill([0.0,0.0])
 
@@ -92,7 +82,9 @@ class LBField:
         self.Cnu=1.0 #Kinematic viscosity 
         self.shear_viscosity_LB=ti.field(float, shape=(num_components,)) 
         self.bulk_viscosity_LB=ti.field(float, shape=(num_components,)) 
-        
+    
+
+
     def init_conversion(self,Cl,Ct,Crho,shear_viscosity,bulk_viscosity):
         self.Ct=Ct
         self.Cl=Cl
@@ -152,23 +144,7 @@ class LBField:
                         self.vel[ix,iy]=[.0,.0]
         print("init hydro IB")
 
-    @ti.kernel 
-    def init_hydro(self,vel:ti.types.vector(2, ti.f32),pressure_lnlet:float):
-        if pressure_lnlet==0.0:
-            for m in range(self.fluid_boundary.count[None]):
-                ix,iy=self.fluid_boundary.group[m]
-                self.vel[ix,iy]=vel
-                for component in range(self.num_components[None]):
-                    self.rho[component,ix,iy]=1.0/ self.num_components[None]
-        else:
-            rho_inlet=1+pressure_lnlet*3/self.C_pressure
-            for m in range(self.fluid_boundary.count[None]):
-                ix,iy=self.fluid_boundary.group[m]
-                k=(1.0-rho_inlet)/self.NX
-                self.vel[ix,iy]=ti.Vector([.0,.0])
-                for component in range(self.num_components[None]):
-                    self.rho[component,ix,iy]=(k*ix+rho_inlet)/ self.num_components[None]
-        print("init hydro")
+
 
     def init_simulation(self,vel,pressure_lnlet,sphere_field=None): 
         self.init_hydro(vel,pressure_lnlet)
@@ -177,26 +153,43 @@ class LBField:
         
 
     @ti.kernel
-    def init_LBM(self,collsion:ti.template()):
-        for m in range(self.fluid_boundary.count[None]):
-            i,j=self.fluid_boundary.group[m]
+    def init_LBM(self,collsion:ti.template(),group:ti.template()):
+        for m in range(group.count[None]):
+            i,j=group.group[m]
             for component in range(self.num_components[None]):
                 self.f[component,i,j]=self.f2[component,i,j]=collsion.f_eq(self.c,self.weights,self.vel[i,j],self.rho[component,i,j])
         print("init LBM")
 
-
+    @ti.kernel
+    def neighbor_classify(self):
+        #group identify
+        for ix,iy in self.mask:
+            if self.mask[ix,iy]!=-1:
+                for k in ti.static(range(self.NPOP)):
+                    ix2=ix-self.c[k,0]
+                    iy2=iy-self.c[k,1]
+                    if ix2<0 or ix2>self.NX-1 or iy2<0 or iy2>self.NY-1 or self.mask[ix2,iy2]==-1:
+                        self.neighbor[ix,iy][k,0]=-1
+                        self.neighbor[ix,iy][k,1]=-1
+                    else:
+                        self.neighbor[ix,iy][k,0]=ix2
+                        self.neighbor[ix,iy][k,1]=iy2
 
 
 
 @ti.data_oriented
 class MacroscopicEngine:
+    def __init__(self,group):
+        self.group=group
+
+
     @ti.kernel
     def density(self,lb_field:ti.template()):
         lb_field.total_rho.fill(.0)
         lb_field.rho.fill(.0)
 
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j=lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i,j=self.group.group[m]
             for component in  range(lb_field.num_components[None]):
                 # compute the density and uncorrected velocity
                 for k in ti.static(range(lb_field.NPOP)):
@@ -209,8 +202,8 @@ class MacroscopicEngine:
     @ti.kernel
     def pressure0(self,lb_field:ti.template()):
         lb_field.pressure.fill(.0)
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j=lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i,j=self.group.group[m]
             lb_field.pressure[0, i, j]+= (lb_field.rho[0, i, j])/3.0
 
             lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
@@ -218,8 +211,8 @@ class MacroscopicEngine:
     @ti.kernel
     def pressure1(self,lb_field:ti.template(),sc_field:ti.template()):
         lb_field.pressure.fill(.0)
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j=lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i,j=self.group.group[m]
             lb_field.pressure[0, i, j] += (lb_field.rho[0, i, j] + 0.5 * sc_field.g * sc_field.psi(lb_field.rho[0, i, j]) ** 2) / 3.0
 
             lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
@@ -227,8 +220,8 @@ class MacroscopicEngine:
     @ti.kernel
     def pressure2(self,lb_field:ti.template(),sc_field:ti.template()):
         lb_field.pressure.fill(.0)
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j=lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i,j=self.group.group[m]
 
             for component1 in  range(lb_field.num_components[None]):
                 lb_field.pressure[component1, i, j] += (lb_field.rho[component1, i, j] + 0.5 * sc_field.g[component1, component1] * sc_field.psi(lb_field.rho[component1, i, j]) ** 2) / 3.0
@@ -265,8 +258,8 @@ class MacroscopicEngine:
 
     @ti.kernel
     def force_density(self,lb_field:ti.template()):
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i,j=lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i,j=self.group.group[m]
             for component in  range(lb_field.num_components[None]):
                 lb_field.body_force[component,i,j]=(lb_field.SCforce[component,i,j]+lb_field.rho[component,i,j]/lb_field.total_rho[i,j]*lb_field.gravity_force)
 
@@ -274,8 +267,8 @@ class MacroscopicEngine:
     @ti.kernel
     def velocity(self,lb_field:ti.template()):
         lb_field.vel.fill([.0,.0])
-        for m in range(lb_field.fluid_boundary.count[None]):
-            i, j = lb_field.fluid_boundary.group[m]
+        for m in range(self.group.count[None]):
+            i, j = self.group.group[m]
             for component in  range(lb_field.num_components[None]):
                 vel_temp = ti.Vector([0.0, 0.0])
                 for k in ti.static(range(lb_field.NPOP)):

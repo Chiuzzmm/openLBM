@@ -9,6 +9,7 @@ import openLBDEM
 import numpy as np
 from matplotlib import cm
 import time
+import taichi.math as tm
 
 print("\n" * 50)
 ti.init(arch=ti.gpu)
@@ -58,29 +59,61 @@ name="test"
 lb_field=openLBDEM.LBField(name,NX_LB,NY_LB,num_components)
 #unit 
 lb_field.init_conversion(Cl=Cl,Ct=Ct,Crho=C_rho,shear_viscosity=shear_viscosity,bulk_viscosity=bulk_viscosity)
-# lb_field.set_gravity(ti.Vector([0.0,-1e-6]))
+lb_field.set_gravity(ti.Vector([-0.5e-5,0.0]))
 
 
 #==============================================
 boundary_engine=openLBDEM.BoundaryEngine()
-# boundary_engine.Mask_cricle_identify(lb_field,100,100,20)
-boundary_engine.boundary_identify(lb_field)
+boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
+
+
+def fluid_boundary(i,j):
+    return lb_field.mask[i,j]==1
+
+fluid=openLBDEM.BoundarySpec(geometry_fn=fluid_boundary)
+fluid_bc=openLBDEM.FluidBoundary(spec=fluid)
+fluid_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("fluid",fluid_bc)
+
+stream_bc=openLBDEM.PeriodicAllBoundary(spec=fluid)
+stream_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("stream",stream_bc)
+
+
+def wall_boundary(i,j):
+    flag=0
+    if lb_field.mask[i,j]==1 :
+        for k in ti.static(range(lb_field.NPOP)):
+            ix2=i-lb_field.c[k,0]
+            iy2=j-lb_field.c[k,1]
+            if iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+                flag=1
+    return flag
+
+wall=openLBDEM.BoundarySpec(geometry_fn=wall_boundary)
+wall_bc=openLBDEM.BounceBackWall(spec=wall)
+wall_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("wall",wall_bc)
+
+
+
+lb_field.neighbor_classify()
 boundary_engine.writing_boundary(lb_field)
 
 #==============================================
-macroscopic_engine=openLBDEM.MacroscopicEngine()
+macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
 #==============================================
-sc_engine=openLBDEM.ShanChenForceC1(lb_field,gA)
+sc_engine=openLBDEM.ShanChenForceC1(lb_field,gA,fluid_bc.group)
 
 #==============================================
-# collision_engine=openLBDEM.BGKCollision(num_components)
+# collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
 # collision_engine.unit_conversion(lb_field)
 
 
-# collision_engine=openLBDEM.TRTCollision(num_components,Magic)
+# collision_engine=openLBDEM.TRTCollision(num_components,,fluid_bc.group,Magic)
 # collision_engine.unit_conversion(lb_field,Magic)
 
-collision_engine=openLBDEM.MRTCollision(num_components)
+collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
 collision_engine.unit_conversion(lb_field)
 
 # k1=np.array([1.0,1.0])
@@ -88,13 +121,37 @@ collision_engine.unit_conversion(lb_field)
 # collision_engine=openLBDEM.HuangMRTCollision(num_components,k1,epslion)
 
 
-#==============================================
-# lb_field.init_hydro(ULB,0.0)
-sc_engine.init_hydro(lb_field)
-lb_field.init_LBM(collision_engine)
+#=============================================
+rho_cr=tm.log(2.0)
+rho_liq=1.93244248895799
+rho_gas=0.156413030238316
+
+@ti.func
+def smooth_step(r, R, transition_width):
+    return 0.5 * (1 - tm.tanh((r - R) / transition_width))
+
+
+@ti.kernel
+def init_hydro():
+    lb_field.vel.fill([.0,.0])
+    for m in range(fluid_bc.group.count[None]):
+        ix,iy=fluid_bc.group.group[m]
+
+        # R=50**2
+        # r=(ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2
+        # if r<R:
+        #     lb_field.rho[0,ix,iy]=rho_liq
+        # else:
+        #     lb_field.rho[0,ix,iy]=rho_gas
+
+        lb_field.rho[0,ix,iy]=rho_cr+0.1*ti.random()
+init_hydro()
+
+lb_field.init_LBM(collision_engine,fluid_bc.group)
 
 
 #==============================================
+post_processing_engine=openLBDEM.PostProcessingEngine(0)
 
 
 # ==============================================solve & show
@@ -106,13 +163,11 @@ def lbm_solve():
     macroscopic_engine.force_density(lb_field)
     macroscopic_engine.velocity(lb_field)
     collision_engine.apply(lb_field)
-    collision_engine.stream_periodic(lb_field)
-    
-    # boundary_engine.apply_boundary_conditions(lb_field)
+    boundary_engine.apply_boundary_conditions(lb_field)
     
 def post():
-    pressure = cm.Blues(macroscopic_engine.post_pressure(lb_field))
-    vel_img = cm.plasma(macroscopic_engine.post_vel(lb_field))
+    pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
+    vel_img = cm.plasma(post_processing_engine.post_vel(lb_field))
     img1 = np.concatenate((pressure, vel_img), axis=1)
     return img1
 

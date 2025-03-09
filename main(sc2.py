@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib import cm
 import time
 import matplotlib.pyplot as plt
+import taichi.math as tm
 
 print("\n" * 50)
 ti.init(arch=ti.gpu)
@@ -72,32 +73,70 @@ lb_field.init_conversion(Cl=Cl,Ct=Ct,Crho=C_rho,shear_viscosity=shear_viscosity,
 
 #==============================================
 boundary_engine=openLBDEM.BoundaryEngine()
-# boundary_engine.Mask_cricle_identify(lb_field,100,100,20)
-boundary_engine.boundary_identify(lb_field)
+boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
+
+def fluid_boundary(i,j):
+    return lb_field.mask[i,j]==1
+
+fluid=openLBDEM.BoundarySpec(geometry_fn=fluid_boundary)
+fluid_bc=openLBDEM.FluidBoundary(spec=fluid)
+fluid_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("fluid",fluid_bc)
+
+stream_bc=openLBDEM.PeriodicAllBoundary(spec=fluid)
+stream_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("stream",stream_bc)
+
+lb_field.neighbor_classify()
 boundary_engine.writing_boundary(lb_field)
 
 #==============================================
-macroscopic_engine=openLBDEM.MacroscopicEngine()
+macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
 #==============================================
-sc_engine=openLBDEM.ShanChenForceC2(lb_field,g)
+sc_engine=openLBDEM.ShanChenForceC2(lb_field,g,fluid_bc.group)
 #==============================================
-# collision_engine=openLBDEM.BGKCollision(num_components)
+# collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
 # collision_engine.unit_conversion(lb_field)
 
-
-# collision_engine=openLBDEM.TRTCollision(num_components)
+# collision_engine=openLBDEM.TRTCollision(num_components,,fluid_bc.group,Magic)
 # collision_engine.unit_conversion(lb_field,Magic)
 
-collision_engine=openLBDEM.MRTCollision(num_components)
+collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
 collision_engine.unit_conversion(lb_field)
 #==============================================
-post_processing_engine=openLBDEM.PostProcessingEngine(1)
+post_processing_engine=openLBDEM.PostProcessingEngine(0)
 
 
 #==============================================
-# lb_field.init_hydro(ULB,0.0)
-sc_engine.init_hydro(lb_field)
-lb_field.init_LBM(collision_engine)
+
+rho0_liq=1.93244248895799
+rho0_gas=0.156413030238316
+rho1_liq=1.76775878467311
+rho1_gas=0.187191599699299
+
+@ti.func
+def smooth_step(r, R, transition_width):
+    return 0.5 * (1 - tm.tanh((r - R) / transition_width))
+
+@ti.kernel
+def init_hydro():
+    lb_field.vel.fill([.0,.0])
+    for m in range(fluid_bc.group.count[None]):
+        ix,iy=fluid_bc.group.group[m]
+
+        R=50
+        r=ti.sqrt((ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2)
+        transition_width=3
+        rho_0=rho0_liq*smooth_step(r,R,transition_width)
+        rho_1=rho0_liq*(1.0-smooth_step(r,R,transition_width))
+        lb_field.rho[0,ix,iy]=rho_0
+        lb_field.rho[1,ix,iy]=rho_1
+        # lb_field.rho[0,ix,iy]=rho_cr+0.1*ti.random()
+        # lb_field.rho[1,ix,iy]=rho_cr+0.1*ti.random()
+init_hydro()
+
+lb_field.init_LBM(collision_engine,fluid_bc.group)
+
 
 
 #==============================================
@@ -112,9 +151,7 @@ def lbm_solve():
     macroscopic_engine.force_density(lb_field)
     macroscopic_engine.velocity(lb_field)
     collision_engine.apply(lb_field)
-    collision_engine.stream_periodic(lb_field)
-    
-    # boundary_engine.apply_boundary_conditions(lb_field)
+    boundary_engine.apply_boundary_conditions(lb_field)
     
 def post():
     pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
@@ -125,16 +162,16 @@ def post():
     return img
 
 
-def history():
-    x1 = np.arange(NX_LB)
-    p=lb_field.total_pressure.to_numpy()[:,lb_field.NY//2]
+# def history():
+#     x1 = np.arange(NX_LB)
+#     p=lb_field.total_pressure.to_numpy()[:,lb_field.NY//2]
     
 
-    # vel = lb_field.vel.to_numpy()
-    # vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
-    # v=vel_mag[:,lb_field.NY//2]
+#     # vel = lb_field.vel.to_numpy()
+#     # vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
+#     # v=vel_mag[:,lb_field.NY//2]
 
-    post_processing_engine.update_plot([(x1,p)])
+#     post_processing_engine.update_plot([(x1,p)])
 
 
 
@@ -154,7 +191,6 @@ if showmode==1:
             img=post()
             gui.set_image(img)
             gui.show()
-        history()
         print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
 
 else:
@@ -165,7 +201,6 @@ else:
         img=post()
         gui.set_image(img)
         gui.show()
-        history()
         print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
 
         filename="test"+'%d' % i

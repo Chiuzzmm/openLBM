@@ -17,24 +17,16 @@ ti.init(arch=ti.gpu)
 
 #mesh 
 scale=1e-3
-domainx=40*scale
+domainx=20*scale
 domainy=8*scale
-NX_LB =int(40*30)
-NY_LB =int(8*30)
+NX_LB =int(20*20)
+NY_LB =int(8*20)
 Cl=domainx/NX_LB
 
-Length_XX1=25*scale
-Length_XX2=35*scale
-Length_XX3=40*scale
-  
+Length_XX1=10*scale
 Length_YY1=8*scale
-Length_YY2=3*scale
-Length_YY3=5*scale
 
-p2=[Length_XX2,Length_YY1]
-p6=[Length_XX1,Length_YY3]
-p4=[Length_XX1,0]
-p8=[Length_XX2,Length_YY2]
+p0=[domainx/8*6,Length_YY1/2]
 
 
 # flow boundary condition
@@ -68,16 +60,30 @@ lb_field=openLBDEM.LBField(name,NX_LB,NY_LB,num_components)
 
 #unit 
 lb_field.init_conversion(Cl=Cl,Ct=Ct,Crho=C_rho,shear_viscosity=shear_viscosity,bulk_viscosity=bulk_viscosity)
-
+lb_field.set_gravity(ti.Vector([5e-6,0.0]))
 
 #==============================================
 boundary_engine=openLBDEM.BoundaryEngine()
 boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
 
-boundary_engine.Mask_rectangle_identify(lb_field,p6[0]/Cl-0.5,p2[0]/Cl-0.5,p6[1]/Cl-0.5,p2[1]/Cl-0.5)
-boundary_engine.Mask_rectangle_identify(lb_field,p4[0]/Cl-0.5,p8[0]/Cl-0.5,p4[1]/Cl-0.5,p8[1]/Cl-0.5)
+boundary_engine.Mask_cricle_identify(lb_field,p0[0]/Cl-0.5,p0[1]/Cl-0.5,Length_YY1/8/Cl-0.5)
 
 
+@ti.kernel
+def neighbor_classify():
+    #group identify
+    for ix,iy in lb_field.mask:
+        if lb_field.mask[ix,iy]!=-1:
+            for k in ti.static(range(lb_field.NPOP)):
+                ix2=ix-lb_field.c[k,0]
+                iy2=iy-lb_field.c[k,1]
+                if ix2<0 or ix2>lb_field.NX-1 or iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+                    lb_field.neighbor[ix,iy][k,0]=-1
+                    lb_field.neighbor[ix,iy][k,1]=-1
+                else:
+                    lb_field.neighbor[ix,iy][k,0]=ix2
+                    lb_field.neighbor[ix,iy][k,1]=iy2
+neighbor_classify()
 
 def fluid_boundary(i,j):
     return lb_field.mask[i,j]==1
@@ -87,20 +93,11 @@ fluid_bc=openLBDEM.FluidBoundary(spec=fluid)
 fluid_bc.precompute(classifier=boundary_classifier)
 boundary_engine.add_boundary_condition("fluid",fluid_bc)
 
-def inside_boundary(i,j):
-    flag=0
-    if lb_field.mask[i,j]==1 :
-        for k in ti.static(range(lb_field.NPOP)):
-            ix2=i-lb_field.c[k,0]
-            iy2=j-lb_field.c[k,1]
-            if ix2>0 and ix2<lb_field.NX-1 and iy2>0 and iy2<lb_field.NY-1 and lb_field.mask[ix2,iy2]==1:
-                flag=1
-    return flag
 
-inside=openLBDEM.BoundarySpec(geometry_fn=inside_boundary)
-inside_bc=openLBDEM.InsideBoundary(spec=inside)
-inside_bc.precompute(classifier=boundary_classifier)
-boundary_engine.add_boundary_condition("inside",inside_bc)
+stream_bc=openLBDEM.PeriodicAllBoundary(spec=fluid)
+stream_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("stream",stream_bc)
+
 
 def wall_boundary(i,j):
     flag=0
@@ -108,7 +105,9 @@ def wall_boundary(i,j):
         for k in ti.static(range(lb_field.NPOP)):
             ix2=i-lb_field.c[k,0]
             iy2=j-lb_field.c[k,1]
-            if ix2<0 or ix2>lb_field.NX-1 or iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+            # if ix2<0 or ix2>lb_field.NX-1 or iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+            # if  iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+            if lb_field.mask[ix2,iy2]==-1:
                 flag=1
     return flag
 
@@ -118,29 +117,27 @@ wall_bc.precompute(classifier=boundary_classifier)
 boundary_engine.add_boundary_condition("wall",wall_bc)
 
 
-def inlet_boundary(i, j):
-    flag=0
-    if lb_field.mask[i,j]==1 and i==0:
-        flag=1
-    return flag  
+# def inlet_boundary(i, j):
+#     flag=0
+#     if lb_field.mask[i,j]==1 and i==0:
+#         flag=1
+#     return flag  
 
-inlet = openLBDEM.BoundarySpec(geometry_fn=inlet_boundary)
-velocity_bc=openLBDEM.VelocityBoundary(spec=inlet,velocity_value=ULB,direction=1)
-velocity_bc.precompute(classifier=boundary_classifier)
-boundary_engine.add_boundary_condition("inlet",velocity_bc)
+# inlet = openLBDEM.BoundarySpec(geometry_fn=inlet_boundary)
+# velocity_bc=openLBDEM.VelocityBoundary(spec=inlet,velocity_value=ULB,direction=1)
+# velocity_bc.precompute(classifier=boundary_classifier)
+# boundary_engine.add_boundary_condition("inlet",velocity_bc)
 
-def outlet_boundary(i,j):
-    flag=0
-    if lb_field.mask[i,j]==1 and i==NX_LB-1:
-        flag=1
-    return flag 
+# def outlet_boundary(i,j):
+#     flag=0
+#     if lb_field.mask[i,j]==1 and i==NX_LB-1:
+#         flag=1
+#     return flag 
 
-outlet=openLBDEM.BoundarySpec(geometry_fn=outlet_boundary,direction=1)
-pressure_bc=openLBDEM.PressureBoundary(spec=outlet,rho_value=1.0,direction=3)
-pressure_bc.precompute(classifier=boundary_classifier)
-boundary_engine.add_boundary_condition("outlet",pressure_bc)
-
-
+# outlet=openLBDEM.BoundarySpec(geometry_fn=outlet_boundary,direction=1)
+# pressure_bc=openLBDEM.PressureBoundary(spec=outlet,rho_value=1.0,direction=3)
+# pressure_bc.precompute(classifier=boundary_classifier)
+# boundary_engine.add_boundary_condition("outlet",pressure_bc)
 
 
 
@@ -149,14 +146,14 @@ boundary_engine.writing_boundary(lb_field)
 #==============================================
 macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
 #==============================================
-collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
-collision_engine.unit_conversion(lb_field)
+# collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
+# collision_engine.unit_conversion(lb_field)
 
 # collision_engine=openLBDEM.TRTCollision(num_components,fluid_bc.group,Magic)
 # collision_engine.unit_conversion(lb_field,Magic)
 
-# collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
-# collision_engine.unit_conversion(lb_field)
+collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
+collision_engine.unit_conversion(lb_field)
 # #==============================================
 post_processing_engine=openLBDEM.PostProcessingEngine(0)
 
