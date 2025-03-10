@@ -11,34 +11,33 @@ import numpy as np
 from matplotlib import cm
 import time
 import matplotlib.pyplot as plt
-import taichi.math as tm
 
-print("\n" * 50)
+
 ti.init(arch=ti.gpu)
 
 #mesh 
 scale=1e-3
-domainx=1*scale
-domainy=1*scale
-NX_LB =int(20*10)+1
-NY_LB =int(20*10)+1
-Cl=domainx/(NX_LB-1)
+domainx=20*scale
+domainy=8*scale
+NX_LB =int(20*20)
+NY_LB =int(8*20)
+Cl=domainx/NX_LB
+
+Length_XX1=10*scale
+Length_YY1=8*scale
+
+p0=[domainx/8*6,Length_YY1/2]
 
 
 # flow boundary condition
-Umax=1e-3
+Umax=1e-2
+pressure_lnlet=10
 
 # flow info
-num_components=2
-
-shear_viscosity=np.array([1e-6,1e-6])
-bulk_viscosity=np.array([1e-6,1e-6])
-# shear_viscosity=np.array([1e-6,1.5e-5])
-# bulk_viscosity=np.array([1e-6,1.5e-5])
-rho_l=1#it.fish.get('rho_ball')#1000 # density of fluid
-rho_g=1
-# rho0=np.sqrt(rho_l*rho_g)
-rho0=1
+num_components=1
+shear_viscosity=[1e-6]
+bulk_viscosity=[2.5e-6]
+rho_flow=1000#it.fish.get('rho_ball')#1000 # density of fluid
 
 cs=0.578 # sound speed 
 Ma=Umax/cs*2.0 #The larger the Ma, the larger the time step
@@ -49,31 +48,26 @@ Uy_LB=0.0
 ULB=ti.Vector([Ux_LB,Uy_LB])
 Cu=Umax/Ux_LB #vel conversion (main)
 Ct=Cl/Cu #time conversion
-C_rho=rho0/1 # density conversion (main)
-
-
+C_rho=rho_flow/1 # density conversion (main)
 
 #TRT
-Magic=np.array([1/4,1/4])
+Magic=[1/4]
 
-
-
-gA=-5.0
-gB=-0.0
-gAB=6.0
-g=np.array([[gA,gAB],[gAB,gB]])
 
 #==============================================
 name="test"
 lb_field=openLBDEM.LBField(name,NX_LB,NY_LB,num_components)
+
 #unit 
 lb_field.init_conversion(Cl=Cl,Ct=Ct,Crho=C_rho,shear_viscosity=shear_viscosity,bulk_viscosity=bulk_viscosity)
-# lb_field.set_gravity(ti.Vector([0.0,-1e-6]))
-
+# lb_field.set_gravity(ti.Vector([5e-6,0.0]))
 
 #==============================================
 boundary_engine=openLBDEM.BoundaryEngine()
 boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
+
+boundary_engine.Mask_cricle_identify(lb_field,p0[0]/Cl-0.5,p0[1]/Cl-0.5,Length_YY1/8/Cl-0.5)
+
 
 def fluid_boundary(i,j):
     return lb_field.mask[i,j]==1
@@ -83,129 +77,129 @@ fluid_bc=openLBDEM.FluidBoundary(spec=fluid)
 fluid_bc.precompute(classifier=boundary_classifier)
 boundary_engine.add_boundary_condition("fluid",fluid_bc)
 
+
 stream_bc=openLBDEM.PeriodicAllBoundary(spec=fluid)
 stream_bc.precompute(classifier=boundary_classifier)
 boundary_engine.add_boundary_condition("stream",stream_bc)
 
-boundary_engine.writing_boundary(lb_field)
 
+def wall_boundary(i,j):
+    flag=0
+    if lb_field.mask[i,j]==1 :
+        for k in ti.static(range(lb_field.NPOP)):
+            ix2=i-lb_field.c[k,0]
+            iy2=j-lb_field.c[k,1]
+            # if ix2<0 or ix2>lb_field.NX-1 or iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+            if  iy2<0 or iy2>lb_field.NY-1 or lb_field.mask[ix2,iy2]==-1:
+            # if lb_field.mask[ix2,iy2]==-1:
+                flag=1
+    return flag
+
+wall=openLBDEM.BoundarySpec(geometry_fn=wall_boundary)
+wall_bc=openLBDEM.BounceBackWall(spec=wall)
+wall_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("wall",wall_bc)
+
+
+def inlet_boundary(i, j):
+    flag=0
+    if lb_field.mask[i,j]==1 and i==0:
+        flag=1
+    return flag  
+
+inlet = openLBDEM.BoundarySpec(geometry_fn=inlet_boundary)
+velocity_bc=openLBDEM.VelocityBoundary(spec=inlet,velocity_value=ULB,direction=1)
+velocity_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("inlet",velocity_bc)
+
+def outlet_boundary(i,j):
+    flag=0
+    if lb_field.mask[i,j]==1 and i==NX_LB-1:
+        flag=1
+    return flag 
+
+outlet=openLBDEM.BoundarySpec(geometry_fn=outlet_boundary,direction=1)
+pressure_bc=openLBDEM.PressureBoundary(spec=outlet,rho_value=1.0,direction=3)
+pressure_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("outlet",pressure_bc)
+
+
+
+lb_field.neighbor_classify()
+boundary_engine.writing_boundary(lb_field)
 #==============================================
 macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
-
 #==============================================
 # collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
 # collision_engine.unit_conversion(lb_field)
 
-# collision_engine=openLBDEM.TRTCollision(num_components,,fluid_bc.group,Magic)
+# collision_engine=openLBDEM.TRTCollision(num_components,fluid_bc.group,Magic)
 # collision_engine.unit_conversion(lb_field,Magic)
 
 collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
 collision_engine.unit_conversion(lb_field)
+# #==============================================
+post_processing_engine=openLBDEM.PostProcessingEngine(0)
 
-#==============================================
-rho_cr=tm.log(2.0)
-rho0_liq=1.93244248895799
-rho0_gas=0.156413030238316
-rho1_liq=1.76775878467311
-rho1_gas=0.187191599699299
 
-def strategy_fn(component: int, x: int, y: int) -> float:
-    rho_neighbor=0.0
-    # 检查坐标是否越界
-    in_domain = (0 <= x < lb_field.NX) and (0 <= y < lb_field.NY)
-    if not in_domain:
-        # 周期边界
-        x2=(x+lb_field.NX)%lb_field.NX 
-        y2=(y+lb_field.NY)%lb_field.NY
-        rho_neighbor= lb_field.rho[component, x2, y2]
 
-    elif lb_field.mask[x, y] == 1:
-        rho_neighbor=  lb_field.rho[component, x, y]
+@ti.kernel 
+def init_hydro(vel:ti.types.vector(2, ti.f32),pressure_lnlet:float):
+    if pressure_lnlet==0.0:
+        for m in range(fluid_bc.group.count[None]):
+            ix,iy=fluid_bc.group.group[m]
+            lb_field.vel[ix,iy]=vel
+            for component in range(lb_field.num_components[None]):
+                lb_field.rho[component,ix,iy]=1.0/ lb_field.num_components[None]
     else:
-        rho_neighbor=  lb_field.rho_solid[x, y]
-    return rho_neighbor
-sc_engine=openLBDEM.ShanChenForceC2(lb_field,g,fluid_bc.group,strategy_fn)
-
-#==============================================
-
-
-@ti.func
-def smooth_step(r, R, transition_width):
-    return 0.5 * (1 - tm.tanh((r - R) / transition_width))
-
-@ti.kernel
-def init_hydro():
-    lb_field.vel.fill([.0,.0])
-    for m in range(fluid_bc.group.count[None]):
-        ix,iy=fluid_bc.group.group[m]
-
-        # R=40**2
-        # r=(ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2
-        # transition_width=3
-        # rho_0=rho0_liq*smooth_step(r,R,transition_width)
-        # rho_1=rho0_liq*(1.0-smooth_step(r,R,transition_width))
-        # lb_field.rho[0,ix,iy]=rho_0
-        # lb_field.rho[1,ix,iy]=rho_1
-        lb_field.rho[0,ix,iy]=rho_cr+0.1*ti.random()
-        lb_field.rho[1,ix,iy]=rho1_liq
-init_hydro()
+        rho_inlet=1+pressure_lnlet*3/lb_field.C_pressure
+        for m in range(fluid_bc.group.count[None]):
+            ix,iy=fluid_bc.group.group[m]
+            k=(1.0-rho_inlet)/lb_field.NX
+            lb_field.vel[ix,iy]=ti.Vector([.0,.0])
+            for component in range(lb_field.num_components[None]):
+                lb_field.rho[component,ix,iy]=(k*ix+rho_inlet)/ lb_field.num_components[None]
+    print("init hydro")
+init_hydro(ULB,0.0)
 
 lb_field.init_LBM(collision_engine,fluid_bc.group)
-#==============================================
-post_processing_engine=openLBDEM.PostProcessingEngine(0)
+
+
+# #==============================================
 
 
 # ==============================================solve & show
 def lbm_solve():
     # LBM SOLVE
     macroscopic_engine.density(lb_field)
-    macroscopic_engine.pressure(lb_field,sc_engine)
-    sc_engine.apply(lb_field)
+    macroscopic_engine.pressure(lb_field)
     macroscopic_engine.force_density(lb_field)
     macroscopic_engine.velocity(lb_field)
+    
     collision_engine.apply(lb_field)
+    
     boundary_engine.apply_boundary_conditions(lb_field)
     
+    pass
+
 def post():
     pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
     vel_img = cm.plasma(post_processing_engine.post_vel(lb_field))
     img1 = np.concatenate((pressure, vel_img), axis=1)
-    img2=cm.magma(post_processing_engine.post_MC_pressure(lb_field))
-    img=np.concatenate((img1,img2),axis=0)
-    return img
-
-
-# def history():
-#     x1 = np.arange(NX_LB)
-#     p=lb_field.total_pressure.to_numpy()[:,lb_field.NY//2]
-    
-
-#     # vel = lb_field.vel.to_numpy()
-#     # vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
-#     # v=vel_mag[:,lb_field.NY//2]
-
-#     post_processing_engine.update_plot([(x1,p)])
-
-
-
-
-post_processing_engine.show()
+    return img1
 
 showmode=1 #1=while # 0=iterations
 start_time = time.time()
-gui = ti.GUI(name, (2*NX_LB,2*NY_LB)) 
-
+gui = ti.GUI(name, (NX_LB,2*NY_LB)) 
 
 if showmode==1:
     while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-        for i in range(1):
-            for j in range(10):
+        for i in range(10):
+            for j in range(20):
                 lbm_solve()
             img=post()
             gui.set_image(img)
             gui.show()
-        print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
-
 else:
     video_manager = ti.tools.VideoManager(output_dir="./results", framerate=24, automatic_build=False)
     for i in range(50):
@@ -231,7 +225,7 @@ else:
     print(f'GIF video is saved to {video_manager.get_output_filename(".gif")}')
 
 
-# 在计算结束后显示绘图窗口
-if showmode == 2:
-    plt.ioff()  # 关闭交互模式
-    plt.show()  # 显示绘图窗口并进入事件循环
+# # 在计算结束后显示绘图窗口
+# if showmode == 2:
+#     plt.ioff()  # 关闭交互模式
+#     plt.show()  # 显示绘图窗口并进入事件循环

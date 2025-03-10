@@ -2,7 +2,9 @@
 
 
 from .openLBM import LBField,MacroscopicEngine
-from .BoundaryCondition import BoundaryCondition, VelocityBoundary, PressureBoundary, BounceBackWall,BoundaryEngine
+
+from .BoundaryCondition import MaskAndGroup,BoundarySpec,BoundaryClassifier,VelocityBoundary,PressureBoundary,InsideBoundary,BoundaryEngine,BounceBackWall,FluidBoundary,PeriodicAllBoundary
+
 from .CollisionEngine import BGKCollision, TRTCollision, MRTCollision,HuangMRTCollision
 
 from .openIBM import IBMNodes,Sphere,SphereIB,IBDEMCouplerEngine,IBEngine
