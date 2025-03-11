@@ -195,7 +195,7 @@ result_dir = "./results"
 video_manager = ti.tools.VideoManager(output_dir=result_dir, framerate=24, automatic_build=False)
 
 
-showmode=1 #1=while # 0=iterations
+showmode=2 #1=while # 0=iterations
 
 if showmode==1:
     while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
