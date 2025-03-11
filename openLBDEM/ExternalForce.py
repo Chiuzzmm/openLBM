@@ -36,12 +36,12 @@ class ShanChenForceC1(ShanChenModel):
                 c=ti.Vector([lb_field.c[k,0],lb_field.c[k,1]])
                 x2 = i + c.x
                 y2 = j + c.y
-                rho_neighbor=self.denstiy_provider(0, x2, y2)
+                rho_neighbor=self.denstiy_provider(x2, y2,0)
 
                 F+=lb_field.weights[k]*c*self.psi(rho_neighbor)
-            F*=(-self.g*self.psi(lb_field.rho[0,i,j]))
+            F*=(-self.g*self.psi(lb_field.rho[i,j,0]))
 
-            lb_field.SCforce[0,i,j]+=F
+            lb_field.SCforce[i,j,0]+=F
 
 
 
@@ -68,10 +68,10 @@ class ShanChenForceC2(ShanChenModel):
                         c=ti.Vector([lb_field.c[k,0],lb_field.c[k,1]])
                         x2 = i + c.x
                         y2 = j + c.y
-                        rho_neighbor=self.denstiy_provider(component2, x2, y2)
+                        rho_neighbor=self.denstiy_provider(x2, y2,component2)
 
                         F+=lb_field.weights[k]*c*self.psi(rho_neighbor)
-                    F*=(-self.g[component1,component2]*self.psi(lb_field.rho[component1,i,j]))
+                    F*=(-self.g[component1,component2]*self.psi(lb_field.rho[i,j,component1]))
 
-                    lb_field.SCforce[component1,i,j]+=F
+                    lb_field.SCforce[i,j,component1]+=F
 

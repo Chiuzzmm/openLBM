@@ -241,7 +241,7 @@ class IBEngine():
                 r2=lb_filed.total_rho[iX,iY]*2.0
                 lb_filed.vel[iX,iY]+=f_temp/r2
                 for component in  range(lb_field.num_components[None]):
-                    lb_filed.body_force[component,iX,iY]+=(f_temp*lb_filed.rho[component,iX,iY]/lb_filed.total_rho[iX,iY])
+                    lb_filed.body_force[iX,iY,component]+=(f_temp*lb_filed.rho[iX,iY,component]/lb_filed.total_rho[iX,iY])
 
 
 

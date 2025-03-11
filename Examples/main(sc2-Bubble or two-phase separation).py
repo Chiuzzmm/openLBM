@@ -1,0 +1,236 @@
+import sys
+import os
+
+# 添加包的路径
+sys.path.append(os.path.join(os.path.dirname(__file__), "openLBM"))
+
+
+import taichi as ti
+import openLBDEM
+import numpy as np
+from matplotlib import cm
+import time
+import matplotlib.pyplot as plt
+import taichi.math as tm
+
+print("\n" * 50)
+ti.init(arch=ti.gpu)
+
+#mesh 
+scale=1e-3
+domainx=1*scale
+domainy=1*scale
+NX_LB =int(20*10)+1
+NY_LB =int(20*10)+1
+Cl=domainx/(NX_LB-1)
+
+
+# flow boundary condition
+Umax=1e-3
+
+# flow info
+num_components=2
+
+shear_viscosity=np.array([1e-6,1e-6])
+bulk_viscosity=np.array([1e-6,1e-6])
+# shear_viscosity=np.array([1e-6,1.5e-5])
+# bulk_viscosity=np.array([1e-6,1.5e-5])
+rho_l=1#it.fish.get('rho_ball')#1000 # density of fluid
+rho_g=1
+# rho0=np.sqrt(rho_l*rho_g)
+rho0=1
+
+cs=0.578 # sound speed 
+Ma=Umax/cs*1.5 #The larger the Ma, the larger the time step
+
+#conversion coefficient
+Ux_LB=Ma*cs# vel of LB
+Uy_LB=0.0
+ULB=ti.Vector([Ux_LB,Uy_LB])
+Cu=Umax/Ux_LB #vel conversion (main)
+Ct=Cl/Cu #time conversion
+C_rho=rho0/1 # density conversion (main)
+
+
+
+#TRT
+Magic=np.array([1/4,1/4])
+
+
+
+gA=-5.0
+gB=-4.0
+gAB=2.0
+g=np.array([[gA,gAB],[gAB,gB]])
+
+#==============================================
+name="test"
+lb_field=openLBDEM.LBField(name,NX_LB,NY_LB,num_components)
+#unit 
+lb_field.init_conversion(Cl=Cl,Ct=Ct,Crho=C_rho,shear_viscosity=shear_viscosity,bulk_viscosity=bulk_viscosity)
+# lb_field.set_gravity(ti.Vector([0.0,-1e-6]))
+
+
+#==============================================
+boundary_engine=openLBDEM.BoundaryEngine()
+boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
+
+def fluid_boundary(i,j):
+    return lb_field.mask[i,j]==1
+
+fluid=openLBDEM.BoundarySpec(geometry_fn=fluid_boundary)
+fluid_bc=openLBDEM.FluidBoundary(spec=fluid)
+fluid_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("fluid",fluid_bc)
+
+stream_bc=openLBDEM.PeriodicAllBoundary(spec=fluid)
+stream_bc.precompute(classifier=boundary_classifier)
+boundary_engine.add_boundary_condition("stream",stream_bc)
+
+boundary_engine.writing_boundary(lb_field)
+
+#==============================================
+macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
+
+#==============================================
+# collision_engine=openLBDEM.BGKCollision(num_components,fluid_bc.group)
+# collision_engine.unit_conversion(lb_field)
+
+# collision_engine=openLBDEM.TRTCollision(num_components,,fluid_bc.group,Magic)
+# collision_engine.unit_conversion(lb_field,Magic)
+
+collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
+collision_engine.unit_conversion(lb_field)
+
+#==============================================
+def strategy_fn( x: int, y: int,component: int) -> float:
+    rho_neighbor=0.0
+    # 检查坐标是否越界
+    in_domain = (0 <= x < lb_field.NX) and (0 <= y < lb_field.NY)
+    if not in_domain:
+        # 周期边界
+        x2=(x+lb_field.NX)%lb_field.NX 
+        y2=(y+lb_field.NY)%lb_field.NY
+        rho_neighbor=  lb_field.rho[x2, y2,component]
+
+    elif lb_field.mask[x, y] == 1:
+        rho_neighbor=  lb_field.rho[x, y,component]
+    else:
+        rho_neighbor=  lb_field.rho_solid[x, y]
+    return rho_neighbor
+sc_engine=openLBDEM.ShanChenForceC2(lb_field,g,fluid_bc.group,strategy_fn)
+
+#==============================================
+rho_cr=tm.log(2.0)
+rho0_liq=1.93244248895799
+rho0_gas=0.156413030238316
+rho1_liq=1.76775878467311
+rho1_gas=0.187191599699299
+
+@ti.func
+def smooth_step(r, R, transition_width):
+    return 0.5 * (1 - tm.tanh((r - R) / transition_width))
+
+@ti.kernel
+def init_hydro():
+    lb_field.vel.fill([.0,.0])
+    for m in range(fluid_bc.group.count[None]):
+        ix,iy=fluid_bc.group.group[m]
+
+        # R=40**2
+        # r=(ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2
+        # transition_width=3
+        # rho_0=rho0_liq*smooth_step(r,R,transition_width)
+        # rho_1=rho1_liq*(1.0-smooth_step(r,R,transition_width))
+        # lb_field.rho[ix,iy,0]=rho_0
+        # lb_field.rho[ix,iy,1]=rho_1
+
+        lb_field.rho[ix,iy,0]=rho_cr+0.1*ti.random()
+        lb_field.rho[ix,iy,1]=rho_cr+0.1*ti.random()
+init_hydro()
+
+lb_field.init_LBM(collision_engine,fluid_bc.group)
+#==============================================
+post_processing_engine=openLBDEM.PostProcessingEngine(0)
+
+
+# ==============================================solve & show
+def lbm_solve():
+    # LBM SOLVE
+    macroscopic_engine.density(lb_field)
+    macroscopic_engine.pressure(lb_field,sc_engine)
+    sc_engine.apply(lb_field)
+    macroscopic_engine.force_density(lb_field)
+    macroscopic_engine.velocity(lb_field)
+    collision_engine.apply(lb_field)
+    boundary_engine.apply_boundary_conditions(lb_field)
+    
+def post():
+    pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
+    vel_img = cm.plasma(post_processing_engine.post_vel(lb_field))
+    img1 = np.concatenate((pressure, vel_img), axis=1)
+    img2=cm.magma(post_processing_engine.post_MC_pressure(lb_field))
+    img=np.concatenate((img1,img2),axis=0)
+    return img
+
+
+# def history():
+#     x1 = np.arange(NX_LB)
+#     p=lb_field.total_pressure.to_numpy()[:,lb_field.NY//2]
+    
+
+#     # vel = lb_field.vel.to_numpy()
+#     # vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
+#     # v=vel_mag[:,lb_field.NY//2]
+
+#     post_processing_engine.update_plot([(x1,p)])
+
+
+
+
+post_processing_engine.show()
+
+showmode=2 #1=while # 0=iterations
+start_time = time.time()
+gui = ti.GUI(name, (2*NX_LB,2*NY_LB)) 
+
+
+if showmode==1:
+    while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
+        for i in range(1):
+            for j in range(10):
+                lbm_solve()
+            img=post()
+            gui.set_image(img)
+            gui.show()
+        print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
+
+else:
+    video_manager = ti.tools.VideoManager(output_dir="./results", framerate=24, automatic_build=False)
+    for i in range(50):
+        for j in range(100):
+            lbm_solve()
+        img=post()
+        gui.set_image(img)
+        gui.show()
+        print(f'\rDelta p= {lb_field.total_pressure[100,100]-lb_field.total_pressure[0,100]}', end='')
+
+        filename="test"+'%d' % i
+        # savefilename = f'2C_unMix_{i:05d}.png'   # create filename with suffix png
+        # gui.show(savefilename)
+        # post_processing_engine.writeVTK(filename,lb_field)
+        # end_time = time.time()
+        # elapsed_time = (end_time - start_time)
+        # print({elapsed_time})
+
+
+        video_manager.write_frame(img)
+    print('Exporting .mp4 and .gif videos...')
+    video_manager.make_video(gif=True, mp4=False)
+    print(f'GIF video is saved to {video_manager.get_output_filename(".gif")}')
+
+
+# 在计算结束后显示绘图窗口
+if showmode == 2:
+    plt.ioff()  # 关闭交互模式
+    plt.show()  # 显示绘图窗口并进入事件循环

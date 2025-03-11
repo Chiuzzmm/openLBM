@@ -2,24 +2,6 @@
 import taichi as ti
 
 
-
-
-@ti.data_oriented
-class MaskAndGroup:
-    def __init__(self,NX,NY):
-        self.mask=ti.field(ti.i32,shape=(NX,NY))
-        self.group=ti.Vector.field(2,int,shape=(NX*NY,))
-        self.count=ti.field(int,shape=())
-
-    @ti.kernel
-    def sort(self):
-        for i,j in self.mask:
-            if self.mask[i,j]==1:
-                idx = ti.atomic_add(self.count[None], 1)
-                self.group[idx]=ti.Vector([i,j])
-
-
-
 @ti.data_oriented
 class LBField:
     def __init__(self,name, NX, NY,num_components):
@@ -37,14 +19,14 @@ class LBField:
 
 
         # 分布函数（双缓冲）
-        self.f = ti.Vector.field(9, float, shape=(num_components,NX, NY)) #populations (old)
-        self.f2 = ti.Vector.field(9, float, shape=(num_components,NX, NY)) #populations (new)
-        self.SCforce=ti.Vector.field(2, float, shape=(num_components,NX, NY))
+        self.f = ti.Vector.field(9, float, shape=(NX, NY,num_components)) #populations (old)
+        self.f2 = ti.Vector.field(9, float, shape=(NX, NY,num_components)) #populations (new)
+        self.SCforce=ti.Vector.field(2, float, shape=(NX, NY,num_components))
 
         # 宏观量
-        self.rho = ti.field(float, shape=(num_components,NX, NY)) #density of components
-        self.pressure=ti.field(float, shape=(num_components,NX, NY))  #pressure
-        self.body_force=ti.Vector.field(2,float,shape=(num_components,NX,NY)) #force populations
+        self.rho = ti.field(float, shape=(NX, NY,num_components)) #density of components
+        self.pressure=ti.field(float, shape=(NX, NY,num_components))  #pressure
+        self.body_force=ti.Vector.field(2,float,shape=(NX, NY,num_components)) #force populations
 
         self.vel = ti.Vector.field(2, float, shape=(NX, NY)) # fluid velocity
         self.total_rho=ti.field(float, shape=(NX, NY)) # density
@@ -157,7 +139,7 @@ class LBField:
         for m in range(group.count[None]):
             i,j=group.group[m]
             for component in range(self.num_components[None]):
-                self.f[component,i,j]=self.f2[component,i,j]=collsion.f_eq(self.c,self.weights,self.vel[i,j],self.rho[component,i,j])
+                self.f[i,j,component]=self.f2[i,j,component]=collsion.f_eq(self.c,self.weights,self.vel[i,j],self.rho[i,j,component])
         print("init LBM")
 
     @ti.kernel
@@ -193,8 +175,8 @@ class MacroscopicEngine:
             for component in  range(lb_field.num_components[None]):
                 # compute the density and uncorrected velocity
                 for k in ti.static(range(lb_field.NPOP)):
-                    lb_field.rho[component,i,j]+=lb_field.f[component,i,j][k]
-                lb_field.total_rho[i,j]+=lb_field.rho[component,i,j]
+                    lb_field.rho[i,j,component]+=lb_field.f[i,j,component][k]
+                lb_field.total_rho[i,j]+=lb_field.rho[i,j,component]
 
 
 
@@ -204,18 +186,18 @@ class MacroscopicEngine:
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
-            lb_field.pressure[0, i, j]+= (lb_field.rho[0, i, j])/3.0
+            lb_field.pressure[i, j,0]+= (lb_field.rho[i, j,0])/3.0
 
-            lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
+            lb_field.total_pressure[i, j]=lb_field.pressure[ i, j,0] 
 
     @ti.kernel
     def pressure1(self,lb_field:ti.template(),sc_field:ti.template()):
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
-            lb_field.pressure[0, i, j] += (lb_field.rho[0, i, j] + 0.5 * sc_field.g * sc_field.psi(lb_field.rho[0, i, j]) ** 2) / 3.0
+            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g * sc_field.psi(lb_field.rho[i, j,0]) ** 2) / 3.0
 
-            lb_field.total_pressure[i, j]=lb_field.pressure[0, i, j] 
+            lb_field.total_pressure[i, j]=lb_field.pressure[i, j,0] 
 
     @ti.kernel
     def pressure2(self,lb_field:ti.template(),sc_field:ti.template()):
@@ -224,15 +206,15 @@ class MacroscopicEngine:
             i,j=self.group.group[m]
 
             for component1 in  range(lb_field.num_components[None]):
-                lb_field.pressure[component1, i, j] += (lb_field.rho[component1, i, j] + 0.5 * sc_field.g[component1, component1] * sc_field.psi(lb_field.rho[component1, i, j]) ** 2) / 3.0
+                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g[component1, component1] * sc_field.psi(lb_field.rho[i, j,component1]) ** 2) / 3.0
 
             p_ij=0.0
             p_ii=0.0
             for component1 in  range(lb_field.num_components[None]):
-                p_ii+=(lb_field.pressure[component1,i,j])
+                p_ii+=(lb_field.pressure[i,j,component1])
                 for component2 in range(component1 + 1, lb_field.num_components[None]):
                     if component1!=component2:
-                        p_ij += sc_field.g[component1, component2] * sc_field.psi(lb_field.rho[component1, i, j]) * sc_field.psi(lb_field.rho[component2, i, j])
+                        p_ij += sc_field.g[component1, component2] * sc_field.psi(lb_field.rho[i, j,component1]) * sc_field.psi(lb_field.rho[i, j,component2])
                 
             lb_field.total_pressure[i, j] = p_ii + p_ij / 3.0 
 
@@ -261,7 +243,7 @@ class MacroscopicEngine:
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
             for component in  range(lb_field.num_components[None]):
-                lb_field.body_force[component,i,j]=(lb_field.SCforce[component,i,j]+lb_field.rho[component,i,j]/lb_field.total_rho[i,j]*lb_field.gravity_force)
+                lb_field.body_force[i,j,component]=(lb_field.SCforce[i,j,component]+lb_field.rho[i,j,component]/lb_field.total_rho[i,j]*lb_field.gravity_force)
 
 
     @ti.kernel
@@ -272,10 +254,10 @@ class MacroscopicEngine:
             for component in  range(lb_field.num_components[None]):
                 vel_temp = ti.Vector([0.0, 0.0])
                 for k in ti.static(range(lb_field.NPOP)):
-                    vel_temp.x += lb_field.f[component,i, j][k] * lb_field.c[k, 0]
-                    vel_temp.y += lb_field.f[component,i, j][k] * lb_field.c[k, 1]
+                    vel_temp.x += lb_field.f[i, j,component][k] * lb_field.c[k, 0]
+                    vel_temp.y += lb_field.f[i, j,component][k] * lb_field.c[k, 1]
                 
-                vel_temp+=0.5 * lb_field.body_force[component,i, j]
+                vel_temp+=0.5 * lb_field.body_force[i,j,component]
                 lb_field.vel[i,j]+=vel_temp
             
             lb_field.vel[i, j] /= lb_field.total_rho[i, j]

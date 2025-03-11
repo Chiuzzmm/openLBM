@@ -45,14 +45,14 @@ class BGKCollision(CollisionAndStream):
             i,j = self.group.group[idx]
             
             for component in range(self.num_components[None]):
-                feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j])
-                force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.body_force[component,i,j],lb_field.vel[i,j])
+                feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j,component])
+                force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.body_force[i,j,component],lb_field.vel[i,j])
 
-                collision_operator =-self.omega[component]*(lb_field.f[component,i,j]-feqeq)
+                collision_operator =-self.omega[component]*(lb_field.f[i,j,component]-feqeq)
                 
                 force_term=(1.0-0.5*self.omega[component])*force_ij
 
-                lb_field.f2[component,i,j]=lb_field.f[component,i,j]+collision_operator+force_term
+                lb_field.f2[i,j,component]=lb_field.f[i,j,component]+collision_operator+force_term
 
 @ti.data_oriented
 class TRTCollision(CollisionAndStream):
@@ -128,21 +128,21 @@ class TRTCollision(CollisionAndStream):
         for idx in range(self.group.count[None]):
             i,j = self.group.group[idx]
             for component in range(self.num_components[None]):
-                feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j])
-                force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.body_force[component,i,j],lb_field.vel[i,j])
+                feqeq=self.f_eq(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i,j,component])
+                force_ij=self.f_force(lb_field.c,lb_field.weights,lb_field.body_force[i,j,component],lb_field.vel[i,j])
 
                 #symmetrical and antisymmetrical particle distribution functions
-                f_sym=self.f_sym(lb_field.f[component,i,j])
+                f_sym=self.f_sym(lb_field.f[i,j,component])
                 feq_sym=self.feq_sym(feqeq)
                 force_sym=self.force_sym(force_ij)
 
-                f_antisym=lb_field.f[component,i,j]-f_sym
+                f_antisym=lb_field.f[i,j,component]-f_sym
                 feq_antisym=feqeq-feq_sym
                 force_antisym=force_ij-force_sym
 
                 collision_operator =-self.omega_sym[component] * (f_sym-feq_sym)-self.omega_antisym[component]*(f_antisym-feq_antisym)
                 force_term=(1.0-0.5*self.omega_sym[component])*force_sym+(1.0-0.5*self.omega_antisym[component])*force_antisym
-                lb_field.f2[component,i,j]=lb_field.f[component,i,j]+collision_operator+force_term
+                lb_field.f2[i,j,component]=lb_field.f[i,j,component]+collision_operator+force_term
 
 @ti.data_oriented
 class MRTCollision(CollisionAndStream):
@@ -250,6 +250,7 @@ class MRTCollision(CollisionAndStream):
     
     @ti.kernel#LBM solve
     def apply(self,lb_field:ti.template()):
+        
         for idx in range(self.group.count[None]):
             i,j = self.group.group[idx]
             for component in range(self.num_components[None]):
@@ -261,10 +262,10 @@ class MRTCollision(CollisionAndStream):
                 #Transform to moment space
                 for ii in ti.static(range(9)):
                     for jj in ti.static(range(9)):
-                        m[ii]+=self.M[ii,jj]*lb_field.f[component,i,j][jj]
+                        m[ii]+=self.M[ii,jj]*lb_field.f[i,j,component][jj]
 
-                meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[component,i,j]) #Compute equilibrium moments
-                mf=self.m_force(lb_field.body_force[component,i,j],lb_field.vel[i,j]) #Guo Forcing
+                meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j,component]) #Compute equilibrium moments
+                mf=self.m_force(lb_field.body_force[i,j,component],lb_field.vel[i,j]) #Guo Forcing
 
                 for ii in ti.static(range(9)):
                     a[ii]=self.diag[component,ii]*(m[ii]-meq[ii])
@@ -277,7 +278,7 @@ class MRTCollision(CollisionAndStream):
                     for jj in ti.static(range(9)):
                         fpop2[ii]+=self.M_inverse[ii,jj]*m2[jj]
 
-                lb_field.f2[component,i,j]=fpop2
+                lb_field.f2[i,j,component]=fpop2
 
 @ti.data_oriented
 class HuangMRTCollision(MRTCollision):
@@ -319,11 +320,11 @@ class HuangMRTCollision(MRTCollision):
                 #Transform to moment space
                 for ii in ti.static(range(9)):
                     for jj in ti.static(range(9)):
-                        ti.atomic_add(m[ii],self.M[ii,jj]*lb_field.f[component,i,j][jj])
+                        ti.atomic_add(m[ii],self.M[ii,jj]*lb_field.f[i,j,component][jj])
 
-                meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[component,i,j]) #Compute equilibrium moments
-                mf=self.m_force(lb_field.body_force[component,i,j],lb_field.vel[i,j]) #Guo Forcing
-                mQ=self.m_Q(lb_field.body_force[component,i,j],lb_field.rho[component,i,j],component,sc_field.g[component]) # huang
+                meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j,component]) #Compute equilibrium moments
+                mf=self.m_force(lb_field.body_force[i,j,component],lb_field.vel[i,j]) #Guo Forcing
+                mQ=self.m_Q(lb_field.body_force[i,j,component],lb_field.rho[i,j,component],component,sc_field.g[component]) # huang
 
                 for ii in ti.static(range(9)):
                     a[ii]=self.diag[component,ii]*(m[ii]-meq[ii])
@@ -337,4 +338,4 @@ class HuangMRTCollision(MRTCollision):
                     for jj in ti.static(range(9)):
                         ti.atomic_add(fpop2[ii],self.M_inverse[ii,jj]*m2[jj])
 
-                lb_field.f2[component,i,j]=fpop2
+                lb_field.f2[i,j,component]=fpop2

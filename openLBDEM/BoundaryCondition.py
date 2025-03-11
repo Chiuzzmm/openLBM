@@ -39,8 +39,6 @@ class BoundaryClassifier:
                     idx = ti.atomic_add(group.count[None], 1)
                     group.group[idx]=ti.Vector([i,j])
 
-
-
 @ti.data_oriented
 class BoundaryCondition:
     def __init__(self, spec: BoundarySpec):
@@ -84,13 +82,12 @@ class VelocityBoundary(PlaneBoundary):
 
     @ti.kernel
     def apply(self, lb_field: ti.template()):
-        
         for m in range(self.group.count[None]):
             i, j = self.group.group[m]
             for component in range(lb_field.num_components[None]):
                 for d in ti.static(self.components):
                     cv = lb_field.c[d,0] * self.velocity_value.x + lb_field.c[d,1] * self.velocity_value.y
-                    lb_field.f[component,i,j][d] += 6 * lb_field.weights[d] * lb_field.rho[component,i,j] * cv
+                    lb_field.f[i, j,component][d] += 6 * lb_field.weights[d] * lb_field.rho[i, j,component] * cv
 
 
 @ti.data_oriented
@@ -131,32 +128,28 @@ class PressureBoundary(PlaneBoundary):
             lb_field.total_rho[i, j] = self.rho_value
             for component in range(lb_field.num_components[None]):
                 # 调用ABC方法计算分布函数
-                ftemp = self.ABC(lb_field.c, lb_field.weights, lb_field.f[component, i, j], self.rho_value, uw)
+                ftemp = self.ABC(lb_field.c, lb_field.weights, lb_field.f[i, j,component], self.rho_value, uw)
                 # 更新特定方向的分布函数分量
                 for d in ti.static(self.components):
-                    lb_field.f[component, i, j][d] = ftemp[d]
+                    lb_field.f[i, j,component][d] = ftemp[d]
 
             #NEEM
             # lb_field.vel[i,j]=lb_field.vel[ix2,iy2]
             # lb_field.rho[i,j]=self.rho_value
-            # lb_field.f[i,j]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[component,i,j],lb_field.vel[ix2,iy2],lb_field.rho[component,ix2,iy2],lb_field.f[component,ix2,iy2])
+            # lb_field.f[i,j,component]=self.NEEM(lb_field.c,lb_field.weights,lb_field.vel[i,j],lb_field.rho[i, j,component],lb_field.vel[ix2,iy2],lb_field.rho[ix2,iy2,component],lb_field.f[ix2,iy2,component])
 
 @ti.data_oriented
 class BounceBackWall(BoundaryCondition):
     def __init__(self,spec: BoundarySpec):
         super().__init__(spec)
-        self.bounce_map = {
-            0:0,
-        1: 3, 3: 1,
-        2: 4, 4: 2,
-        5: 7, 7: 5,
-        6: 8, 8: 6
-        }
-    
-    @staticmethod
-    def get_bounce_dir(self,direction):
-        return self.bounce_map.get(direction, direction)
-    
+        # self.bounce_map = {
+        #     0:0,
+        # 1: 3, 3: 1,
+        # 2: 4, 4: 2,
+        # 5: 7, 7: 5,
+        # 6: 8, 8: 6
+        # }
+        self.bounce_map=ti.Vector([0, 3, 4, 1, 2, 7, 8, 5, 6])
 
     @ti.kernel
     def apply(self, lb_field:ti.template()): # type: ignore
@@ -168,12 +161,12 @@ class BounceBackWall(BoundaryCondition):
                 if ix2!=-1:
                     #stream in boundary
                     for component in range(lb_field.num_components[None]):
-                        lb_field.f[component,i,j][k]=lb_field.f2[component,ix2,iy2][k]
+                        lb_field.f[i,j,component][k]=lb_field.f2[ix2,iy2,component][k]
                 else:
                     #bounce back on the static wall 
                     ipop=self.bounce_map[k]
                     for component in range(lb_field.num_components[None]):
-                        lb_field.f[component,i,j][k]=lb_field.f2[component,i,j][ipop]
+                        lb_field.f[i,j,component][k]=lb_field.f2[i,j,component][ipop]
 
 
 
@@ -191,7 +184,7 @@ class PeriodicAllBoundary(BoundaryCondition):
                     x2=(i-lb_field.c[k,0]+lb_field.NX)%lb_field.NX 
                     y2=(j-lb_field.c[k,1]+lb_field.NY)%lb_field.NY
                     for component in  range(lb_field.num_components[None]):
-                        lb_field.f[component,i,j][k]=lb_field.f2[component,x2,y2][k]
+                        lb_field.f[i,j,component][k]=lb_field.f2[x2,y2,component][k]
 
     
 
@@ -209,7 +202,7 @@ class InsideBoundary(BoundaryCondition):
                 ix2=lb_field.neighbor[i,j][k,0]
                 iy2=lb_field.neighbor[i,j][k,1]
                 for component in  range(lb_field.num_components[None]):
-                    lb_field.f[component,i,j][k]=lb_field.f2[component,ix2,iy2][k]
+                    lb_field.f[i,j,component][k]=lb_field.f2[ix2,iy2,component][k]
 
 
 @ti.data_oriented

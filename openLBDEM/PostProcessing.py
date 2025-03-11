@@ -54,7 +54,7 @@ class PostProcessingEngine:
     def post_MC_pressure(self,lb_field:ti.template()):
         images = []
         for component in range(lb_field.num_components[None]):
-            data = self.nomalized_field(lb_field.pressure.to_numpy()[component,:,:])
+            data = self.nomalized_field(lb_field.pressure.to_numpy()[:,:,component])
             images.append(data)
         
         return np.concatenate(images, axis=1)
