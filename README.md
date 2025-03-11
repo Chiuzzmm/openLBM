@@ -1,13 +1,22 @@
-# LBM练习
-示例全部使用taichi编写，LBM计算结构基本相同。部分小功能使用matlab计算。
+# 一个LBM项目的练习
+项目使用taichi编写，快就完事了。源文件于openLBDEM。examples文件夹包含了示例文件。使用时，将main文件置于openLBDEM同级目录下，或者是修改导入目录。
 
-1. BGK, MRT, TRT 展示了三种不同的碰撞模型以及相应的单位转换过程。
-2. Maxwell 使用python和matlab计算了两种不同的状态方程。
-3. shanchen-2PhaseMix 展示了使用原始shanchen模型模拟两相分离的过程。
-4. Young-Laplace test 使用原始shanchen模型模拟无限域中的稳态液滴。
-5. contact angle test  使用原始shanchen模型模拟了管道中的液滴。
-6. contact angle test (曲面边界) 使用原始shanchen模型模拟了液滴撞击曲面固体的过程。
-7. MRT-huang 使用Rongzong Huang 提出的模型模拟了无限域中的稳态液滴。
-8. contact line on stationary circular cylinders 使用Rongzong Huang模型和BC边界模拟了上下半平面为两相的固体接触角。
-9. IBM使用了浸没边界法模拟了静止颗粒在管道中的流场, IBM使用MDF格式。
-10. IBM-SC使用浸没边界法代替固体边界，结合Rongzong Huang模型模拟两相流体。注意在该模拟中，IB节点设置在气体区域中需要适当的初始条件，否则容易崩溃。
+1. main(Circular cylinder) 展示了圆柱绕流。 分别使用BGK, MRT, TRT 三种不同的碰撞模型，包含单位转换过程。
+
+![圆柱绕流](results/main(Circular%20cylinder).gif)
+
+2. main(sc1-Bubble or two-phase separation) 展示了使用原始shanchen模型模拟单组份两相分离的过程。该案例还可以进行拉普拉斯测试。
+
+![单组份相分离](results/main(sc1-Bubble%20or%20two-phase%20separation).gif)
+
+3. main(sc1-contact-line_) 展示了单组分中上下半平面的固体接触角。
+
+![](results/main(sc1-contact-line_).gif)
+
+3. main(sc2-Bubble or two-phase separation)展示了使用原始shanchen模型模拟多组分问题。
+
+![多组分](results/main(sc2-Bubble%20or%20two-phase%20separation).gif)
+
+也可以进行拉普拉斯测试
+
+![](results/YLtest_2c.png#pic_center)
