@@ -32,8 +32,7 @@ class LBField:
         self.total_rho=ti.field(float, shape=(NX, NY)) # density
         self.total_pressure=ti.field(float, shape=(NX, NY))
 
-        self.rho_solid=ti.field(float, shape=(NX, NY)) #use for shan-chen
-
+        self.rho_solid=ti.field(float, shape=(NX, NY,num_components)) #use for shan-chen
 
         # D2Q9模型参数
         self.NPOP = 9 
@@ -104,36 +103,6 @@ class LBField:
         return self.Cu
     
 
-    @ti.kernel 
-    def init_hydro_IB(self,sphere_field:ti.template()):
-        # 初始化球体区域
-        for n in range(sphere_field.num[None]):
-            center_x = sphere_field.Sphere[n].pos.x
-            center_y = sphere_field.Sphere[n].pos.y
-            radius = sphere_field.Sphere[n].radius
-            radius_sq = radius ** 2
-
-            # 计算球体覆盖的网格范围
-            min_ix = int(ti.max(0, center_x - radius))
-            max_ix = int(ti.min(self.NX - 1, center_x + radius))
-            min_iy = int(ti.max(0, center_y - radius))
-            max_iy = int(ti.min(self.NY - 1, center_y + radius))
-
-            # 遍历球体覆盖的网格区域
-            for ix in range(min_ix, max_ix + 1):
-                for iy in range(min_iy, max_iy + 1):
-                    if (ix - center_x) ** 2 + (iy - center_y) ** 2 <= radius_sq:
-                        self.vel[ix,iy]=[.0,.0]
-        print("init hydro IB")
-
-
-
-    def init_simulation(self,vel,pressure_lnlet,sphere_field=None): 
-        self.init_hydro(vel,pressure_lnlet)
-        if sphere_field!=None:
-            self.init_hydro_IB(sphere_field)
-        
-
     @ti.kernel
     def init_LBM(self,collsion:ti.template(),group:ti.template()):
         for m in range(group.count[None]):
@@ -195,7 +164,7 @@ class MacroscopicEngine:
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
-            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g * sc_field.psi(lb_field.rho[i, j,0]) ** 2) / 3.0
+            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g_coh * sc_field.psi(lb_field.rho[i, j,0]) ** 2) / 3.0
 
             lb_field.total_pressure[i, j]=lb_field.pressure[i, j,0] 
 
@@ -206,7 +175,7 @@ class MacroscopicEngine:
             i,j=self.group.group[m]
 
             for component1 in  range(lb_field.num_components[None]):
-                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g[component1, component1] * sc_field.psi(lb_field.rho[i, j,component1]) ** 2) / 3.0
+                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g_coh[component1, component1] * sc_field.psi(lb_field.rho[i, j,component1]) ** 2) / 3.0
 
             p_ij=0.0
             p_ii=0.0
@@ -214,7 +183,7 @@ class MacroscopicEngine:
                 p_ii+=(lb_field.pressure[i,j,component1])
                 for component2 in range(component1 + 1, lb_field.num_components[None]):
                     if component1!=component2:
-                        p_ij += sc_field.g[component1, component2] * sc_field.psi(lb_field.rho[i, j,component1]) * sc_field.psi(lb_field.rho[i, j,component2])
+                        p_ij += sc_field.g_coh[component1, component2] * sc_field.psi(lb_field.rho[i, j,component1]) * sc_field.psi(lb_field.rho[i, j,component2])
                 
             lb_field.total_pressure[i, j] = p_ii + p_ij / 3.0 
 

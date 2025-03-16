@@ -1,0 +1,75 @@
+
+
+def wall_pars1
+  local scale=1e-3
+  
+  ;Length_XX1=50*scale
+  ;Length_XX2=72*scale
+  ;Length_XX3=72*scale
+  
+  Length_XX1=25*scale
+  Length_XX2=35*scale
+  Length_XX3=40*scale
+  
+  Length_YY1=8*scale
+  Length_YY2=3*scale
+  Length_YY3=5*scale
+
+  ;vertices
+  p0=vector(0+deviation,0+deviation);0
+  p3=vector(0+deviation,Length_YY1+deviation);3
+  
+  p7=vector(Length_XX1+deviation,Length_YY1+deviation);7
+  p6=vector(Length_XX1+deviation,Length_YY3+deviation);6
+  p5=vector(Length_XX1+deviation,Length_YY2+deviation);5
+  p4=vector(Length_XX1+deviation,0+deviation);4
+  
+  p2=vector(Length_XX2+deviation,Length_YY1+deviation);2
+  p9=vector(Length_XX2+deviation,Length_YY3+deviation);9
+  p8=vector(Length_XX2+deviation,Length_YY2+deviation);8
+  p1=vector(Length_XX2+deviation,0+deviation);1
+
+  p11=vector(Length_XX3,Length_YY1+deviation);11
+  p10=vector(Length_XX3,0+deviation);10
+
+  
+  ;p76=vector(p7(1)-(math.abs(p7(2)-p6(2)))/math.tan(60*math.pi/180),p7(2))
+  ;p54=vector(p4(1)-(math.abs(p5(2)-p4(2)))/math.tan(60*math.pi/180),p4(2))
+  
+  p99=vector(0-domainy*2.8+deviation,Length_YY1+deviation)
+  p98=vector(0-domainy*2.8+deviation,0+deviation)
+end
+
+
+def gen_wall_1
+ command
+    wall create vertices @p0 @p4 
+    wall create vertices @p3 @p7
+
+    wall create vertices @p5 @p8
+    wall create vertices @p6 @p9
+    wall create vertices @p2 @p11
+    wall create vertices @p1 @p10
+
+
+    wall create vertices @p4 @p5
+    wall create vertices @p6 @p7
+    wall create vertices @p1 @p8
+    wall create vertices @p9 @p2
+
+    
+    ;wall create vertices @p76 @p6
+    ;wall create vertices @p54 @p5
+    
+  endcommand
+end
+
+
+
+
+
+
+
+
+
+

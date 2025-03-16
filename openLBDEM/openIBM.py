@@ -240,7 +240,7 @@ class IBEngine():
                 #Correct previous Eulerian velocity
                 r2=lb_filed.total_rho[iX,iY]*2.0
                 lb_filed.vel[iX,iY]+=f_temp/r2
-                for component in  range(lb_field.num_components[None]):
+                for component in  range(lb_filed.num_components[None]):
                     lb_filed.body_force[iX,iY,component]+=(f_temp*lb_filed.rho[iX,iY,component]/lb_filed.total_rho[iX,iY])
 
 

@@ -1,0 +1,83 @@
+
+model random 257
+[emod = 1e6]
+[krat = 0.1]
+[fric = 0.4]
+
+[rmax=2e-3/2.86/2]
+[rmin=rmax/1]
+[rho_ball=3e3]
+
+
+contact cmat default model linear method deform emod @emod kratio @krat
+contact cmat default property dp_nratio 0.1 fric @fric
+cmat apply
+
+wall generate group '1' slot '1' box [p98(1)] [p7(1)] [p98(2)] [p7(2)] 
+
+[porosity=0.6]
+ball delete
+ball distribute porosity @porosity resolution 1 ...
+  box [p98(1)] [p7(1)] [p98(2)] [p7(2)]    ...
+  bin 1 gauss radius @rmin @rmax group 'slurry' 
+
+;ball create position-x [Length_XX1/8] position-y [Length_YY1/2] radius [Length_YY1/15]
+
+  
+ball attribute density @rho_ball damp 0.1
+
+
+
+model display active off
+;model update-interval 2000
+program echo on
+
+model orientation-tracking true
+model mechanical timestep auto
+model cycle 2000
+model cycle 1000 calm 10
+model cycle 2000
+
+ball attribute rotation 0 displacement  0 0
+
+
+[lnlet_vel=1e-2]
+
+
+
+wall delete walls
+;wall create vertices @p99 @p98
+
+@gen_wall_1
+
+
+
+def BallRotation
+  loop foreach bp ball.list
+    ball.extra(bp,1)=ball.rotation(bp)
+  endloop
+end
+@BallRotation
+
+
+
+
+;[p00=vector(p0(1)+domainy/10,p3(2))];0
+
+;[p00=vector(p0(1)-domainy,p3(2))];0
+;def SetVelocity
+;  loop foreach local bp ball.inbox(p98,p3,false)
+;    ball.vel.x(bp)=lnlet_vel
+;    ball.vel.y(bp)=0
+;  endloop
+;end
+;@SetVelocity
+;fish callback add @SetVelocity -1 interval 5000
+
+
+ball delete range position-x -1 [Length_XX1/10]
+
+model save 'create_ball'
+
+
+

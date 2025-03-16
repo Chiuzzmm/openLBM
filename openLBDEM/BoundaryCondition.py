@@ -14,9 +14,10 @@ class MaskAndGroup:
 @ti.data_oriented
 class BoundarySpec:
     """边界条件描述符，定义如何识别边界节点"""
-    def __init__(self, geometry_fn, direction=None):
-        self.geometry_fn =ti.func( geometry_fn)  # 几何判断函数
+    def __init__(self, geometry_fn, direction=None,value_fn=None):
+        self.geometry_fn =geometry_fn  # 几何判断函数
         self.direction = direction      # 可选方向约束
+        self.value_fn =value_fn
 
 @ti.data_oriented
 class BoundaryClassifier:

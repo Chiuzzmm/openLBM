@@ -50,15 +50,16 @@ class PostProcessingEngine:
         return self.nomalized_field(lb_field.total_pressure.to_numpy())
 
 
-
     def post_MC_pressure(self,lb_field:ti.template()):
         images = []
         for component in range(lb_field.num_components[None]):
             data = self.nomalized_field(lb_field.pressure.to_numpy()[:,:,component])
             images.append(data)
-        
         return np.concatenate(images, axis=1)
 
+    def post_denstiy(self,lb_field:ti.template()):
+        data=lb_field.rho.to_numpy()[:,:,0]
+        return data
 
     def post_vel(self,lb_field:ti.template()):
         vel = lb_field.vel.to_numpy()

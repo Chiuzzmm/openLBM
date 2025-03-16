@@ -1,0 +1,37 @@
+
+model new
+model large-strain on
+model random 10001
+model orientation-tracking true
+
+
+def domain_Pars
+  domainx=40e-3
+  domainy=8e-3
+  NX_LB = 40*30
+  NY_LB = 8*30
+  
+  Cl=domainx/NX_LB 
+  domainy=Cl*NY_LB
+  error=1e-3
+  deviation=0
+  command
+    ;;destroy
+    model domain extent [0-domainy*3-error] [domainx+error] [0-error] [domainy+error] ...
+      condition destroy periodic
+    ;periodic
+    ;model domain extent [0] [domainx+error] [0-error] [domainy+error] ...
+    ;  condition periodic periodic
+  endcommand
+  
+end
+@domain_Pars
+
+
+program call 'gen_wall.dat'
+
+
+@wall_pars1
+
+model save 'create_wall'
+
