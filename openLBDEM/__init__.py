@@ -8,6 +8,6 @@ from .BoundaryCondition import MaskAndGroup,BoundarySpec,BoundaryClassifier,Velo
 from .CollisionEngine import BGKCollision, TRTCollision, MRTCollision,HuangMRTCollision
 
 from .openIBM import IBMNodes,Sphere,SphereIB,IBDEMCouplerEngine,IBEngine
-from .ExternalForce import ShanChenForceC1,ShanChenForceC2
+from .ExternalForce import ShanChenForceC1,ShanChenForceC2,SC_psi,vdW_psi,RK_psi,PR_psi,CS_psi
 
 from .PostProcessing import PostProcessingEngine

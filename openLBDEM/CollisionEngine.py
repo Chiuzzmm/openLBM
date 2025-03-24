@@ -282,22 +282,23 @@ class MRTCollision(CollisionAndStream):
 
 @ti.data_oriented
 class HuangMRTCollision(MRTCollision):
-    def __init__(self,num_components,group,k1,epslion):
+    def __init__(self,num_components,group,k1,epslion,g_coh):
         super().__init__(num_components,group)
         self.k1=ti.field(float, shape=(num_components,)) 
         self.k2=ti.field(float, shape=(num_components,)) 
+        self.g_coh=ti.field(float,shape=(num_components,))
 
         for component in range(self.num_components[None]):
             self.k1[component]=k1[component]
             self.k2[component]=epslion[component]/(-8.)-k1[component]
-
+            self.g_coh[component]=g_coh[component,component]
 
     @ti.func
-    def m_Q(self,F,rho,component,g):
+    def m_Q(self,F,psi,component,g_coh):
         Qm=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
         F2=tm.dot(F,F)
         a=3*(self.k1[component]+2*self.k2[component])*F2
-        b=g*self.psi(rho)**2
+        b=g_coh*psi**2
         
         Qm[1]=a/b
         Qm[2]=-Qm[1]
@@ -324,7 +325,9 @@ class HuangMRTCollision(MRTCollision):
 
                 meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j,component]) #Compute equilibrium moments
                 mf=self.m_force(lb_field.body_force[i,j,component],lb_field.vel[i,j]) #Guo Forcing
-                mQ=self.m_Q(lb_field.body_force[i,j,component],lb_field.rho[i,j,component],component,sc_field.g[component]) # huang
+                
+                psi=sc_field.psi.get_psi(lb_field.rho[i,j,component],lb_field.T[i,j])
+                mQ=self.m_Q(lb_field.body_force[i,j,component],psi,component,self.g_coh[component]) # huang
 
                 for ii in ti.static(range(9)):
                     a[ii]=self.diag[component,ii]*(m[ii]-meq[ii])

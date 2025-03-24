@@ -73,8 +73,9 @@ class PostProcessingEngine:
         velx=vel[:,:,0].T.flatten()  
         vely=vel[:,:,1].T.flatten()  
 
-        pressure=lb_field.total_pressure.to_numpy().T.flatten()  
+        # pressure=lb_field.total_pressure.to_numpy().T.flatten()  
 
+        T=lb_field.T.to_numpy().T.flatten()
         # bodyforce=lb_field.body_force.to_numpy()
         # bodyforcex=bodyforce[:,:,0].T.flatten()
         # bodyforcey=bodyforce[:,:,1].T.flatten()
@@ -106,10 +107,13 @@ class PostProcessingEngine:
             fout.write("LOOKUP_TABLE density_table\n")  
             np.savetxt(fout, rho * lb_field.C_rho, fmt='%.8f') 
         
-            fout.write("SCALARS Pressure double\n")  
-            fout.write("LOOKUP_TABLE Pressure_table\n")  
-            np.savetxt(fout, pressure * lb_field.C_pressure, fmt='%.8f') 
+            # fout.write("SCALARS Pressure double\n")  
+            # fout.write("LOOKUP_TABLE Pressure_table\n")  
+            # np.savetxt(fout, pressure * lb_field.C_pressure, fmt='%.8f') 
 
+            fout.write("SCALARS T double\n")  
+            fout.write("LOOKUP_TABLE T_table\n")  
+            np.savetxt(fout, T, fmt='%.8f') 
 
             fout.write("VECTORS velocity double\n")  
             velocity_data = np.column_stack((velx * lb_field.Cu, vely * lb_field.Cu, np.zeros_like(velx)))  

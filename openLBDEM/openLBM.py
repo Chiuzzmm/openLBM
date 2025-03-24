@@ -31,6 +31,8 @@ class LBField:
         self.vel = ti.Vector.field(2, float, shape=(NX, NY)) # fluid velocity
         self.total_rho=ti.field(float, shape=(NX, NY)) # density
         self.total_pressure=ti.field(float, shape=(NX, NY))
+        self.T = ti.field( float, shape=(NX, NY)) #temperature
+        self.time=ti.field(int,shape=())
 
         self.rho_solid=ti.field(float, shape=(NX, NY,num_components)) #use for shan-chen
 
@@ -59,26 +61,50 @@ class LBField:
         self.C_pressure=1.0
         self.C_force=1.0 # force conversion
         self.C_torque=1.0 
+        self.C_temperature=1.0 # temperature conversion
 
         self.Cnu=1.0 #Kinematic viscosity 
         self.shear_viscosity_LB=ti.field(float, shape=(num_components,)) 
         self.bulk_viscosity_LB=ti.field(float, shape=(num_components,)) 
-    
 
+        self.C_T=1.0
 
-    def init_conversion(self,Cl,Ct,Crho,shear_viscosity,bulk_viscosity):
-        self.Ct=Ct
-        self.Cl=Cl
-        self.C_rho=Crho
+    def init_conversion(self,params: dict):
+        default_params={
+            'Cl':None,
+            'Ct':None,
+            'C_rho':None,
+            'shear_viscosity':None,
+            'bulk_viscosity':None,
+            'rho_cr_real':None,
+            'pressure_cr_real':None,
+            'temperature_cr_real':None,
+            'sc_field':None,
+        }
+        params = {**default_params, **params}
+        
+        self.Ct=params['Ct']
+        self.Cl=params['Cl']
         self.Cu=self.Cl/self.Ct
-        self.C_force=self.Cl**3*self.C_rho/self.Ct**2 
-        self.C_torque=self.C_force*self.Cl
-        self.C_pressure=self.C_rho*self.Cu**2
         self.Cnu=self.Cl**2/self.Ct
 
+        if params['C_rho']!=None:
+            self.C_rho=params['C_rho']
+            self.C_pressure=self.C_rho*self.Cu**2
+        else:
+            self.C_rho=params['rho_cr_real']/params['sc_field'].psi.rho_cr
+            self.C_pressure=params['pressure_cr_real']/params['sc_field'].psi.pressure_cr
+            self.C_temperature=params['temperature_cr_real']/params['sc_field'].psi.temperature_cr
+            
+        
+        self.C_force=self.Cl**3*self.C_rho/self.Ct**2 
+        self.C_torque=self.C_force*self.Cl
+        
+        
         for component in range(self.num_components[None]):
-            self.shear_viscosity_LB[component]=shear_viscosity[component]/self.Cnu
-            self.bulk_viscosity_LB[component]=bulk_viscosity[component]/self.Cnu
+            self.shear_viscosity_LB[component]=params['shear_viscosity'][component]/self.Cnu
+            self.bulk_viscosity_LB[component]=params['bulk_viscosity'][component]/self.Cnu
+
 
         print("="*20)
         print("init conversion")
@@ -86,8 +112,6 @@ class LBField:
         print(f"  Ct : {self.Ct}")
         print(f"  C_rho : {self.C_rho}")
         
-        for component in range(self.num_components[None]):
-            print(f"    shear viscosity LB: {self.shear_viscosity_LB[component]}")
 
 
     def set_gravity(self,g):
@@ -133,6 +157,8 @@ class MacroscopicEngine:
     def __init__(self,group):
         self.group=group
 
+    def time_updata(self,lb_field:ti.template()):
+        lb_field.time[None]+=1
 
     @ti.kernel
     def density(self,lb_field:ti.template()):
@@ -146,9 +172,6 @@ class MacroscopicEngine:
                 for k in ti.static(range(lb_field.NPOP)):
                     lb_field.rho[i,j,component]+=lb_field.f[i,j,component][k]
                 lb_field.total_rho[i,j]+=lb_field.rho[i,j,component]
-
-
-
 
     @ti.kernel
     def pressure0(self,lb_field:ti.template()):
@@ -164,7 +187,7 @@ class MacroscopicEngine:
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
-            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g_coh * sc_field.psi(lb_field.rho[i, j,0]) ** 2) / 3.0
+            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g_coh * sc_field.psi.get_psi(lb_field.rho[i, j,0],lb_field.T[i,j]) ** 2) / 3.0
 
             lb_field.total_pressure[i, j]=lb_field.pressure[i, j,0] 
 
@@ -175,7 +198,7 @@ class MacroscopicEngine:
             i,j=self.group.group[m]
 
             for component1 in  range(lb_field.num_components[None]):
-                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g_coh[component1, component1] * sc_field.psi(lb_field.rho[i, j,component1]) ** 2) / 3.0
+                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g_coh[component1, component1] * sc_field.psi1.get_psi(lb_field.rho[i, j,component1],lb_field.T[i,j]) ** 2) / 3.0
 
             p_ij=0.0
             p_ii=0.0
@@ -183,7 +206,7 @@ class MacroscopicEngine:
                 p_ii+=(lb_field.pressure[i,j,component1])
                 for component2 in range(component1 + 1, lb_field.num_components[None]):
                     if component1!=component2:
-                        p_ij += sc_field.g_coh[component1, component2] * sc_field.psi(lb_field.rho[i, j,component1]) * sc_field.psi(lb_field.rho[i, j,component2])
+                        p_ij += sc_field.g_coh[component1, component2] * sc_field.psi1.get_psi(lb_field.rho[i, j,component1],lb_field.T[i,j]) * sc_field.psi2.get_psi(lb_field.rho[i, j,component2],lb_field.T[i,j])
                 
             lb_field.total_pressure[i, j] = p_ii + p_ij / 3.0 
 
@@ -192,7 +215,7 @@ class MacroscopicEngine:
             # for component1 in  range(lb_field.num_components[None]):
             #     p_ii+=lb_field.rho[component1,i,j]
             #     for component2 in  range(lb_field.num_components[None]):
-            #         p_ij+=sc_field.g[component1,component2]*sc_field.psi(lb_field.rho[component1,i,j])*sc_field.psi(lb_field.rho[component2,i,j])/2.0
+            #         p_ij+=sc_field.g[component1,component2]*sc_field.psi.get_psi(lb_field.rho[component1,i,j])*sc_field.psi.get_psi(lb_field.rho[component2,i,j])/2.0
 
             # lb_field.total_pressure[i,j]=p_ii+p_ij/3.0
 
