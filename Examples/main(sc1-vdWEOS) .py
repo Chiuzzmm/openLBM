@@ -1,9 +1,7 @@
 import sys
 import os
-
 # 添加包的路径
 sys.path.append(os.path.join(os.path.dirname(__file__), "openLBM"))
-
 import taichi as ti
 import openLBDEM
 import numpy as np
@@ -24,17 +22,15 @@ Cl=domainx/(NX_LB-1)
 
 
 # flow boundary condition
-
-Umax=1e-2
+Umax=1e-3
 
 # flow info
 num_components=1
 shear_viscosity=np.array([1e-6])
 bulk_viscosity=np.array([1e-6])
-rho0=1
 
 cs=0.578 # sound speed 
-Ma=Umax/cs*0.5 #The larger the Ma, the larger the time step
+Ma=Umax/cs*0.8 #The larger the Ma, the larger the time step
 
 #conversion coefficient
 Ux_LB=Ma*cs# vel of LB
@@ -42,60 +38,40 @@ Uy_LB=0.0
 ULB=ti.Vector([Ux_LB,Uy_LB])
 Cu=Umax/Ux_LB #vel conversion (main)
 Ct=Cl/Cu #time conversion
-C_rho=rho0/1 # density conversion (main)
-
-# SC EOS
-rho_density = np.array([
-    [0.0214769757706125, 3.85149307207969],
-    [0.0240768092050442, 3.73852047172410],
-    [0.0270279723451117, 3.62436648394743],
-    [0.0303866231380030, 3.50890765731552],
-    [0.0342200986869335, 3.39200335859288],
-    [0.0386097872910226, 3.27349228093092],
-    [0.0436548957054659, 3.15318788636729],
-    [0.0494775794531934, 3.03087245867260],
-    [0.0562299442008887, 2.90628907559641],
-    [0.0641039116291098, 2.77913062559753],
-    [0.0733453816895005, 2.64902429160983],
-    [0.0842752289872210, 2.51550900183698],
-    [0.0973215091582950, 2.37800139655330],
-    [0.113071008931171, 2.23574210655470],
-    [0.132356291264673, 2.08770614656931],
-    [0.156413030238316, 1.93244248895799],
-    [0.187191599699299, 1.76775878467311],
-    [0.228058754735636, 1.59001518629020]
-])
-G=np.array([-8, -7.8, -7.6, -7.4, -7.2, -7, -6.8, -6.6, -6.4, -6.2, -6, -5.8, -5.6, -5.4, -5.2, -5, -4.8, -4.6])
 
 
-rho_cr=tm.log(2.0)
-idx=11
-g_coh=G[idx]
-rho_liq=rho_density[idx,1]
-rho_gas=rho_density[idx,0]
-print(f"G={g_coh}")
+rho_cr_real= 3.5000000000
+p_cr_real=0.750000000
+T_cr_real= 0.5714285714
+
+rho_cr_LB= 3.5000000000
+p_cr_LB=0.750000000
+T_cr_LB= 0.5714285714
+
+gcoh=-1.0
+vdw_params = {
+    'a': 0.184 , 
+    'b': 0.095,
+    'R': 1, 
+    'G':gcoh,
+    'rho_cr':rho_cr_LB,
+    'pressure_cr': p_cr_LB,
+    'temperature_cr':T_cr_LB,
+    }
+
+Tr=0.95
+rho_liq=5.11604570   #rhog_sat 
+rho_gas=2.026552244   
 print(f"density ratio={rho_liq/rho_gas}")
 
 #huang MRT pars
 k1=np.array([0.15]) #sufrce tension
 epslion=np.array([1.0]) #density ratio
 
-
-
 showmode=1 #1=while # 0=iterations
 #==============================================
 name="test"
 lb_field=openLBDEM.LBField(name,NX_LB,NY_LB,num_components)
-#unit 
-LB_params={
-    'Cl':Cl,
-    'Ct':Ct,
-    'C_rho':C_rho,
-    'shear_viscosity':shear_viscosity,
-    'bulk_viscosity':bulk_viscosity
-}
-lb_field.init_conversion(LB_params)
-
 #==============================================
 boundary_engine=openLBDEM.BoundaryEngine()
 boundary_classifier=openLBDEM.BoundaryClassifier(NX=NX_LB,NY=NY_LB)
@@ -115,23 +91,8 @@ boundary_engine.add_boundary_condition("stream",stream_bc)
 
 boundary_engine.writing_boundary(lb_field)
 
-#==============================================
-macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
-
-#==============================================
-
-
-# collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
-# collision_engine.unit_conversion(lb_field)
-
-
-collision_engine=openLBDEM.HuangMRTCollision(num_components,fluid_bc.group,k1,epslion,np.array([[g_coh]]))
-collision_engine.unit_conversion(lb_field)
-
 
 #=============================================
-
-
 @ti.func
 def fluid_spec( x2: int, y2: int):
     return 1
@@ -152,17 +113,41 @@ def fluid_T( x: int, y: int) -> float:
     return T_neighbor
 
 fluid_spec_bc=openLBDEM.BoundarySpec(geometry_fn=fluid_spec,value_fn=fluid_density)
-sc_engine=openLBDEM.ShanChenForceC1(
+sc_engine = openLBDEM.ShanChenForceC1(
     lb_field=lb_field,
     group=fluid_bc.group,
-    psi=openLBDEM.SC_psi(1.),
-    g_coh=g_coh,
+    psi=openLBDEM.vdW_psi(params=vdw_params),  # 将参数封装到字典中
+    g_coh=gcoh,
     fluid_strategy=fluid_spec_bc,
     T_strategy=fluid_T
-    )
+)
+
+#=============================================
+#unit 
+LB_params={
+    'Cl':Cl,
+    'Ct':Ct,
+    'C_rho':None,
+    'shear_viscosity':shear_viscosity,
+    'bulk_viscosity':bulk_viscosity,
+    'rho_cr_real':rho_cr_real,
+    'pressure_cr_real':p_cr_real,
+    'temperature_cr_real':T_cr_real,
+    'sc_field':sc_engine,
+}
+lb_field.init_conversion(LB_params)
+
 
 #==============================================
+macroscopic_engine=openLBDEM.MacroscopicEngine(fluid_bc.group)
 
+#==============================================
+collision_engine=openLBDEM.MRTCollision(num_components,fluid_bc.group)
+collision_engine.unit_conversion(lb_field)
+
+# collision_engine=openLBDEM.HuangMRTCollision(num_components,fluid_bc.group,k1,epslion,np.array([[vdw_params['G']]]))
+# collision_engine.unit_conversion(lb_field)
+#==============================================
 
 @ti.kernel
 def init_hydro():
@@ -170,7 +155,7 @@ def init_hydro():
     for m in range(fluid_bc.group.count[None]):
         ix,iy=fluid_bc.group.group[m]
 
-        R=50**2
+        R=15**2
         r=(ix-lb_field.NX/2)**2+(iy-lb_field.NY/2)**2
         if r<R:
             lb_field.rho[ix,iy,0]=rho_liq
@@ -178,7 +163,15 @@ def init_hydro():
             lb_field.rho[ix,iy,0]=rho_gas
 
         # lb_field.rho[ix,iy,0]=rho_cr+0.1*ti.random()
-    lb_field.T.fill(1)
+
+    # for num in range(2):
+    #     for m in range(fluid_bc.group.count[None]):
+    #         ix,iy=fluid_bc.group.group[m]
+
+    #         ix = ix % lb_field.NX
+    #         iy = iy % lb_field.NY
+    #         lb_field.rho[ix,iy,0]=1/4*(lb_field.rho[ix-1,iy,0]+lb_field.rho[ix+1,iy,0]+lb_field.rho[ix,iy+1,0]+lb_field.rho[ix,iy-1,0])
+    lb_field.T.fill(Tr*T_cr_LB)
 init_hydro()
 
 lb_field.init_LBM(collision_engine,fluid_bc.group)
@@ -187,8 +180,11 @@ lb_field.init_LBM(collision_engine,fluid_bc.group)
 #==============================================
 post_processing_engine=openLBDEM.PostProcessingEngine(0)
 
-
-
+@ti.kernel
+def cool():
+    k=0.00002
+    T= T_cr_LB * (0.7 + 0.25 * tm.exp(-k * lb_field.time[None]))
+    lb_field.T.fill(T)
 # ==============================================solve & show
 def lbm_solve():
     # LBM SOLVE
@@ -197,8 +193,10 @@ def lbm_solve():
     sc_engine.apply(lb_field)
     macroscopic_engine.force_density(lb_field)
     macroscopic_engine.velocity(lb_field)
-    collision_engine.apply(lb_field,sc_engine)
+    collision_engine.apply(lb_field)
     boundary_engine.apply_boundary_conditions(lb_field)
+    macroscopic_engine.time_updata(lb_field)
+    cool()
     
 def post():
     pressure = cm.Blues(post_processing_engine.post_pressure(lb_field))
@@ -213,14 +211,12 @@ result_dir = "./results"
 video_manager = ti.tools.VideoManager(output_dir=result_dir, framerate=24, automatic_build=False)
 
 
-
-
 if showmode==1:
     while not gui.get_event(ti.GUI.ESCAPE, ti.GUI.EXIT):
-        for j in range(50):
+        for j in range(10):
             lbm_solve()
         img=post()
-        print(f"\rdroplet density 0= {lb_field.rho[100, 100, 0]:.3f}, air density 0= {lb_field.rho[0, 100, 0]:.3f}, ratio={lb_field.rho[100, 100, 0]/lb_field.rho[0, 100, 0]:.3f}", end='')
+        print(f"\rdroplet density 0= {lb_field.rho[100, 100, 0]:.3f}, air density 0= {lb_field.rho[0, 100, 0]:.3f}, ratio={lb_field.rho[100, 100, 0]/lb_field.rho[0, 100, 0]:.3f}, Tr={lb_field.T[100, 100]/T_cr_LB:.3f},Time={lb_field.time[None]}", end='')
         gui.set_image(img)
         gui.show()
 else:
@@ -235,7 +231,6 @@ else:
         # gui.show(savefilename)
 
         video_manager.write_frame(img)
-
 
     print('Exporting .mp4 and .gif videos...')
     video_manager.make_video(gif=True, mp4=False)
