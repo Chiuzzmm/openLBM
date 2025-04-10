@@ -18,7 +18,7 @@ class LBField:
         print(f"  组分数量 : {self.num_components[None]}")
 
 
-        # 分布函数（双缓冲）
+        # 分布函数
         self.f = ti.Vector.field(9, float, shape=(NX, NY,num_components)) #populations (old)
         self.f2 = ti.Vector.field(9, float, shape=(NX, NY,num_components)) #populations (new)
         self.SCforce=ti.Vector.field(2, float, shape=(NX, NY,num_components))
@@ -32,9 +32,7 @@ class LBField:
         self.total_rho=ti.field(float, shape=(NX, NY)) # density
         self.total_pressure=ti.field(float, shape=(NX, NY))
         self.T = ti.field( float, shape=(NX, NY)) #temperature
-        self.time=ti.field(int,shape=())
-
-        self.rho_solid=ti.field(float, shape=(NX, NY,num_components)) #use for shan-chen
+        self.time = ti.field(ti.i32, shape=())
 
         # D2Q9模型参数
         self.NPOP = 9 
@@ -44,10 +42,12 @@ class LBField:
         #boundary info
         self.gravity_force=ti.Vector([0.0,0.0]) #gravity
 
-
         self.neighbor=ti.Matrix.field(n=9,m=2,dtype=int,shape=(self.NX,self.NY))
 
         self.mask=ti.field(int,shape=(self.NX,self.NY)) # 掩码：1-流体, -1-固体
+
+        #多物理场耦合
+        self.sc_field=None
 
 
         self.mask.fill(1)
@@ -76,10 +76,8 @@ class LBField:
             'C_rho':None,
             'shear_viscosity':None,
             'bulk_viscosity':None,
-            'rho_cr_real':None,
-            'pressure_cr_real':None,
-            'temperature_cr_real':None,
-            'sc_field':None,
+            'C_pressure':None,
+            'C_temperature':None
         }
         params = {**default_params, **params}
         
@@ -87,16 +85,10 @@ class LBField:
         self.Cl=params['Cl']
         self.Cu=self.Cl/self.Ct
         self.Cnu=self.Cl**2/self.Ct
+        self.C_rho=params['C_rho']
+        self.C_pressure=params['C_pressure']
+        self.C_temperature=params['C_temperature']
 
-        if params['C_rho']!=None:
-            self.C_rho=params['C_rho']
-            self.C_pressure=self.C_rho*self.Cu**2
-        else:
-            self.C_rho=params['rho_cr_real']/params['sc_field'].psi.rho_cr
-            self.C_pressure=params['pressure_cr_real']/params['sc_field'].psi.pressure_cr
-            self.C_temperature=params['temperature_cr_real']/params['sc_field'].psi.temperature_cr
-            
-        
         self.C_force=self.Cl**3*self.C_rho/self.Ct**2 
         self.C_torque=self.C_force*self.Cl
         
@@ -143,13 +135,14 @@ class LBField:
                 for k in ti.static(range(self.NPOP)):
                     ix2=ix-self.c[k,0]
                     iy2=iy-self.c[k,1]
-                    if ix2<0 or ix2>self.NX-1 or iy2<0 or iy2>self.NY-1 or self.mask[ix2,iy2]==-1:
-                        self.neighbor[ix,iy][k,0]=-1
-                        self.neighbor[ix,iy][k,1]=-1
-                    else:
+                    # if ix2<0 or ix2>self.NX-1 or iy2<0 or iy2>self.NY-1 or self.mask[ix2,iy2]==-1:
+                    if 0 <= ix2 < self.NX and 0 <= iy2 < self.NY and self.mask[ix2, iy2] != -1:
                         self.neighbor[ix,iy][k,0]=ix2
                         self.neighbor[ix,iy][k,1]=iy2
-
+                        
+                    else:
+                        self.neighbor[ix,iy][k,0]=-1
+                        self.neighbor[ix,iy][k,1]=-1
 
 
 @ti.data_oriented
@@ -183,22 +176,23 @@ class MacroscopicEngine:
             lb_field.total_pressure[i, j]=lb_field.pressure[ i, j,0] 
 
     @ti.kernel
-    def pressure1(self,lb_field:ti.template(),sc_field:ti.template()):
+    def pressure1(self,lb_field:ti.template()):
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
-            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * sc_field.g_coh * sc_field.psi.get_psi(lb_field.rho[i, j,0],lb_field.T[i,j]) ** 2) / 3.0
+            lb_field.pressure[i, j,0] += (lb_field.rho[i, j,0] + 0.5 * lb_field.sc_field.g_coh * lb_field.sc_field.psi_field[i,j,0] ** 2) / 3.0
 
-            lb_field.total_pressure[i, j]=lb_field.pressure[i, j,0] 
+            lb_field.total_pressure[i, j]=lb_field.pressure[i, j,0]
+
 
     @ti.kernel
-    def pressure2(self,lb_field:ti.template(),sc_field:ti.template()):
+    def pressure2(self,lb_field:ti.template()):
         lb_field.pressure.fill(.0)
         for m in range(self.group.count[None]):
             i,j=self.group.group[m]
 
             for component1 in  range(lb_field.num_components[None]):
-                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * sc_field.g_coh[component1, component1] * sc_field.psi1.get_psi(lb_field.rho[i, j,component1],lb_field.T[i,j]) ** 2) / 3.0
+                lb_field.pressure[i, j,component1] += (lb_field.rho[i, j,component1] + 0.5 * lb_field.sc_field.g_coh[component1, component1] * lb_field.sc_field.psi_field[i,j,component1] ** 2) / 3.0
 
             p_ij=0.0
             p_ii=0.0
@@ -206,29 +200,20 @@ class MacroscopicEngine:
                 p_ii+=(lb_field.pressure[i,j,component1])
                 for component2 in range(component1 + 1, lb_field.num_components[None]):
                     if component1!=component2:
-                        p_ij += sc_field.g_coh[component1, component2] * sc_field.psi1.get_psi(lb_field.rho[i, j,component1],lb_field.T[i,j]) * sc_field.psi2.get_psi(lb_field.rho[i, j,component2],lb_field.T[i,j])
+                        p_ij += lb_field.sc_field.g_coh[component1, component2] * lb_field.sc_field.psi_field[i,j,component1] * lb_field.sc_field.psi_field[i,j,component2]
                 
-            lb_field.total_pressure[i, j] = p_ii + p_ij / 3.0 
+            lb_field.total_pressure[i, j] = p_ii + p_ij / 6.0 
 
-            # p_ij=0.0
-            # p_ii=0.0
-            # for component1 in  range(lb_field.num_components[None]):
-            #     p_ii+=lb_field.rho[component1,i,j]
-            #     for component2 in  range(lb_field.num_components[None]):
-            #         p_ij+=sc_field.g[component1,component2]*sc_field.psi.get_psi(lb_field.rho[component1,i,j])*sc_field.psi.get_psi(lb_field.rho[component2,i,j])/2.0
 
-            # lb_field.total_pressure[i,j]=p_ii+p_ij/3.0
-
-    def pressure(self,lb_field:ti.template(),sc_field=None):
-        if sc_field==None:
+    def pressure(self,lb_field:ti.template()):
+        if lb_field.sc_field==None:
             self.pressure0(lb_field)
         else:
             if lb_field.num_components[None]==1:
-                self.pressure1(lb_field,sc_field)
+                self.pressure1(lb_field)
             else:
-                self.pressure2(lb_field,sc_field)
+                self.pressure2(lb_field)
         
-
 
     @ti.kernel
     def force_density(self,lb_field:ti.template()):

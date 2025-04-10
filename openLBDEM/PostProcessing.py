@@ -76,10 +76,6 @@ class PostProcessingEngine:
         # pressure=lb_field.total_pressure.to_numpy().T.flatten()  
 
         T=lb_field.T.to_numpy().T.flatten()
-        # bodyforce=lb_field.body_force.to_numpy()
-        # bodyforcex=bodyforce[:,:,0].T.flatten()
-        # bodyforcey=bodyforce[:,:,1].T.flatten()
-
         x_coords = np.arange(lb_field.NX)  
         y_coords = np.arange(lb_field.NY)  
         x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  
@@ -115,15 +111,45 @@ class PostProcessingEngine:
             fout.write("LOOKUP_TABLE T_table\n")  
             np.savetxt(fout, T, fmt='%.8f') 
 
+
             fout.write("VECTORS velocity double\n")  
             velocity_data = np.column_stack((velx * lb_field.Cu, vely * lb_field.Cu, np.zeros_like(velx)))  
             np.savetxt(fout, velocity_data, fmt='%.8f') 
-  
-            # fout.write("VECTORS f double\n")  
-            # bodyforce = np.column_stack((bodyforcex, bodyforcey, np.zeros_like(bodyforcex)))  
-            # np.savetxt(fout, bodyforce, fmt='%.8f') 
-
 
         print(filename)
 
 
+    def writeVTKpsi(self,fname,lb_field:ti.template()):
+        PSI=lb_field.sc_field.psi_field.to_numpy()[:,:,0].T.flatten()
+
+        x_coords = np.arange(lb_field.NX+2)  
+        y_coords = np.arange(lb_field.NY+2)  
+        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  
+
+        x_flat = x_mesh.flatten()  
+        y_flat = y_mesh.flatten()  
+
+
+        filename = fname + ".vtk"  
+        with open(filename, 'w') as fout:  
+            fout.write("# vtk DataFile Version 3.0\n")  
+            fout.write("Hydrodynamics representation\n")  
+            fout.write("ASCII\n\n")  
+            fout.write("DATASET STRUCTURED_GRID\n")  
+            fout.write(f"DIMENSIONS {lb_field.NX+2} {lb_field.NY+2} 1\n")  
+            fout.write(f"POINTS {(lb_field.NX+2)*(lb_field.NY+2)} double\n")  
+          
+            np.savetxt(fout, np.column_stack((x_flat, y_flat, np.zeros_like(x_flat))), fmt='%.0f')  
+          
+            fout.write("\n")  
+            fout.write(f"POINT_DATA {(lb_field.NX+2)*(lb_field.NY+2)}\n")  
+
+
+
+            fout.write("SCALARS PSI double\n")  
+            fout.write("LOOKUP_TABLE T_table\n")  
+            np.savetxt(fout, PSI, fmt='%.8f') 
+
+
+
+        print(filename)

@@ -311,6 +311,7 @@ class HuangMRTCollision(MRTCollision):
     def apply(self,lb_field:ti.template(),sc_field:ti.template()):
         for idx in range(self.group.count[None]):
             i,j = self.group.group[idx]
+
             for component in range(self.num_components[None]):
                 m=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
                 a=ti.Vector([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
@@ -326,7 +327,7 @@ class HuangMRTCollision(MRTCollision):
                 meq=self.m_eq(lb_field.vel[i,j],lb_field.rho[i,j,component]) #Compute equilibrium moments
                 mf=self.m_force(lb_field.body_force[i,j,component],lb_field.vel[i,j]) #Guo Forcing
                 
-                psi=sc_field.psi.get_psi(lb_field.rho[i,j,component],lb_field.T[i,j])
+                psi=sc_field.psi_field[i,j,component]
                 mQ=self.m_Q(lb_field.body_force[i,j,component],psi,component,self.g_coh[component]) # huang
 
                 for ii in ti.static(range(9)):
