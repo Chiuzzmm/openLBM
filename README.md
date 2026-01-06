@@ -363,18 +363,24 @@ lb_field.sc_field = openLBDEM.ShanChenForceC1(sc_pars)
 #### Circular Cylinder
 Velocity inlet on the left, open outlet on the right, periodic top & bottom.  
 A solid circular cylinder is immersed in the domain.
+
 ![](/results/Circular%20cylinder.gif)
 
 #### Contraction Flow
 Velocity inlet on the left, pressure outlet on the right, no-slip top wall.  
 The channel contains a localized contraction.
+
 ![](/results/contraction%20flow.gif)
+
 #### Power-Law Fluid
 Lid-driven cavity: no-slip on left, right and bottom walls; moving lid on top.  
 Non-Newtonian fluid modeled with a power-law rheology.
+
 ![](/results/Power%20Law%20Fluid.gif)
+
 #### Bubble / Two-Phase Separation
 Fully periodic domain.  
 Initial density field is randomized; subsequent phase separation produces distinct gas and liquid regions.
 
 ![](/results/two-phase%20separation.gif)
+
